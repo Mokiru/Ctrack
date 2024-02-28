@@ -227,13 +227,94 @@ orange
 8. let子句：引入用于存储查询表达式中的子表达式结果的范围变量。
 
 例子：
-
+```c#
+List<int> list = new List<int> { 1,3,3,3,3,2 };
+var m1 = from i in list where i % 2 == 1 select i;
+foreach(var i in m1) {
+	Console.Write($"{i} ");
+}
+/// 最终输出结果为 1 3 3 3 3
+```
 
 ### LINQ高级查询
 
 - `Count()`：返回集合项的数目。
 - `Max/Min/Average/Sum`：即最大/最小/平均/总和。
-- `ThenBy()`：提供复合排序条件。
-- 
+- `ThenBy()`：提供复合排序条件。 `OrderBy`对一个条件排序，`ThenBy`可以在此结果上又对另一个条件排序。
+- 分区类查询：
+	- `Take`：提取指定数量的项。
+	```c#
+	List<int> list = new List<int> { 1, 3, 8, 0, 10 };
+	var m = list.Take(2);
+	foreach(var i in m) {
+		Console.Write($"{i} ");
+	}
+	// 输出 1 3
+	```
+	- `Skip`：跳过指定数量的项并获取剩余的项
+	```c#
+	List<int> list = new List<int> { 1, 3, 8, 0, 10 };
+	var m = list.Skip(2);
+	foreach(var i in m) {
+		Console.Write($"{i} ");
+	}
+	// 输出 8 0 10
+	```
+	- `TakeWhile`：只要满足指定条件，就会返回序列的元素，然后跳过剩余元素。（即遇到第一个不满足条件的就停止，然后返回之前的）。
+	- `SkipWhile`：只要满足指定条件，就会跳过序列中的元素，然后返回剩余元素。（即遇到第一个不满足条件的就停止，然后返回剩下的）。
+	```c#
+	List<int> list = new List<int> { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 };
+	var m1 = list.Where(x => x < 3);
+	var m2 = list.SkipWhile(x => x < 3);
+	var m3 = list.TakeWhile(x => x < 3);
+	Console.WriteLine("Where:");
+	foreach (var i in m1)
+	{
+		Console.Write($"{i} ");
+	}
+	Console.WriteLine("\nSkipWhile:");
+	foreach (var i in m2)
+	{
+		Console.Write($"{i} ");
+	}
+	Console.WriteLine("\nTakeWhile:");
+	foreach (var i in m3)
+	{
+		Console.Write($"{i} ");
+	}
+	//输出结果为
+	//Where:
+	//1 2
+	//SkipWhile:
+	//3 4 5 6 7 8 9 10
+	//TakeWhile:
+	//1 2
+	```
+- `Distinct`：去掉集合中的重复项。
+```c#
+List<int> list = new List<int> { 1,3,3,3,3,2 };
+var m1 = list.Distinct();
+foreach(var i in m1) {
+	Console.Write($"{i} ");
+}
+// 最终输出结果 为 1 3 2。
+```
+- `Range(int start, int count)`：生成一个**整数**序列。是Enumerable静态方法。
+```c#
+var list = Enumerable.Range(2, 10);
+foreach(var i in list) {
+	Console.Write($"{i} ");
+}
+// 输出结果为 2 3 4 5 6 7 8 9 10 11
+```
+- `Repeat(T element, int count)`：生成一个重复项（可以是泛型）的序列。是Enumerable静态方法。
+```c#
+var list = Enumerable.Repeat(2, 10);
+foreach(var i in list) {
+	Console.Write($"{i} ");
+}
+// 输出 2 2 2 2 2 2 2 2 2 2 
+```
+
 
 
