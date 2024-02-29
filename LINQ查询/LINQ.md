@@ -11,6 +11,14 @@ LINQ主要包含以下三部分：
     - LINQ to Entities。
 
 LINQ所在`System.Linq`命名空间。
+## 注意
+
+使用LINQ查询过后`ToArray()`等方法想要直接赋值给原数组例如：
+```c#
+int[] nums = new int[3]{1,2,3};
+nums = nums.Take(1).ToArray();
+```
+这样是没有作用的必须使用遍历赋值。
 
 ## Linq查询方法
 
