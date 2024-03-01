@@ -389,4 +389,18 @@ Contains 8x12x10 by volume: True
 
 接口`ICollection<T>`扩展`IEnumerable<T>;IDictionary<TKey,TValue>`和`IList<T>`是扩展`ICollection<T>`的更专用的接口，`IDictionary<TKey,TValue>`实现是键/值对的集合，如`Dictionary<TKey,TValue>`类。`IList<T>`实现是值的集合，其成员可以通过索引进行访问。
 
-如果接口和`IList<T>`接口
+如果接口`IList<T>`和接口`IDictionary<TKey, TValue>`都不符合所需集合的要求，请从`ICollection<T>`接口派生新的集合类，以获得更大的灵活性。
+
+## 属性
+
+- `Count`：获取`IColletion<T>`中包含的元素数。
+- `IsReadOnly`：获取一个值，该值指示`ICollection<T>`是否为只读。
+
+## 方法
+
+- `Add(T)`：将某项添加到`ICollection<T>`中。
+- `Clear()`：从`ICollection<T>`中移除所有项。
+- `Contains(T)`：确定`ICollection<T>`是否包含特定值。
+- `CopyTo(T[], Int32)`：从特定的`ICollection<T>`索引开始，将`Array`的元素复制到一个`Array`中。
+- `GetEnumerator()`：返回循环访问集合的枚举数。（继承自`IEnumerable`）。
+- `Remove(T)`：从`ICollection<T>`中移除特定对象的第一个匹配项。
