@@ -19,7 +19,7 @@ public class List<T> : System.Collections.Generic.ICollection<T>, System.Collect
 
 ## 构造函数
 
-`List<T>()`: 
+`List<T>()`: 初始化`List<T>`
 
 
 ## 问题总结
