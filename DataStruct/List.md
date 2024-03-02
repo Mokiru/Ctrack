@@ -25,4 +25,6 @@ public class List<T> : System.Collections.Generic.ICollection<T>, System.Collect
 ## 问题总结
 
 1. C#的List在使用过程中有什么需要注意的点？防止效率低下需要注意的点呢？
-    
+
+
+2. 与ArrayList区别：1.
