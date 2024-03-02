@@ -247,7 +247,7 @@ foreach(var i in m1) {
 ### LINQ高级查询
 
 - `Count()`：返回集合项的数目。
-- `Max/Min/Average/Sum`：即最大/最小/平均/总和。
+- `Max/Min/Average/Sum`：即最大/最小/平均/总和。**注意**：使用Sum求和时，可能数组本身是int，但是最终可能结果应该用long，最好自己遍历求和而不使用LINQ。
 - `ThenBy()`：提供复合排序条件。 `OrderBy`对一个条件排序，`ThenBy`可以在此结果上又对另一个条件排序。
 - 分区类查询：
 	- `Take`：提取指定数量的项。
