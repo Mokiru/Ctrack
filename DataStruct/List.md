@@ -69,6 +69,7 @@ foreach (var i in list)
         - List提供了更多的API和LINQ查询（实现IEnumerable<T>接口）语法，更易于对集合进行操作和处理。
         - ArrayList较为简单，处理元素繁琐。
 
+从下面源码可以知道，List是基于数组实现的。
 ```c#
 // ==++==
 // 
