@@ -84,6 +84,197 @@ foreach(var value in dict.Values) {
 
 `Clear()`方法用于清空整个字典。即删除所有的键值对。
 
+## 源码
+
+```c#
+private struct Entry {
+    public int hashCode;    // Lower 31 bits of hash code, -1 if unused
+    public int next;        // Index of next entry, -1 if last
+    public TKey key;           // Key of entry
+    public TValue value;         // Value of entry
+}
+ 
+private int[] buckets; // 内部维护的数据地址
+private Entry[] entries; // 元素数组，用于维护哈希表中的数据
+private int count; // 元素数量
+private int version; 
+private int freeList; // 空闲的列表
+private int freeCount; // 空闲列表的元素数量
+private IEqualityComparer<TKey> comparer; // 哈希表中的比较函数
+private KeyCollection keys; // 键集合
+private ValueCollection values; // 值集合
+private Object _syncRoot;
+```
+`buckets`想在哈希函数与`entries`之间解耦的一层关系，哈希函数变化不再直接影响`entries`，`freeList`类似一个单链表，用于存储被释放出来的空间，即空链表，一般被优先存入数据。`freeCount`空链表的空位数量。
+
+```C#
+private void Initialize(int capacity) { 
+    // 根据构造函数设定的初始容量，获取一个近似的质数
+    int size = HashHelpers.GetPrime(capacity);
+    buckets = new int[size];
+    for (int i = 0; i < buckets.Length; i++) buckets[i] = -1;
+    entries = new Entry[size];
+    freeList = -1;
+}
+
+// HashHelpers中
+// Table of prime numbers to use as hash table sizes. 
+// A typical resize algorithm would pick the smallest prime number in this array
+// that is larger than twice the previous capacity. 
+// Suppose our Hashtable currently has capacity x and enough elements are added 
+// such that a resize needs to occur. Resizing first computes 2x then finds the 
+// first prime in the table greater than 2x, i.e. if primes are ordered 
+// p_1, p_2, ..., p_i, ..., it finds p_n such that p_n-1 < 2x < p_n. 
+// Doubling is important for preserving the asymptotic complexity of the 
+// hashtable operations such as add.  Having a prime guarantees that double 
+// hashing does not lead to infinite loops.  IE, your hash function will be 
+// h1(key) + i*h2(key), 0 <= i < size.  h2 and the size must be relatively prime.
+public static readonly int[] primes = {
+    3, 7, 11, 17, 23, 29, 37, 47, 59, 71, 89, 107, 131, 163, 197, 239, 293, 353, 431, 521, 631, 761, 919,1103, 1327, 1597, 1931, 2333, 2801, 3371, 4049, 4861, 5839, 7013, 8419, 10103, 12143, 14591,17519, 21023, 25229, 30293, 36353, 43627, 52361, 62851, 75431, 90523, 108631, 130363, 156437,187751, 225307, 270371, 324449, 389357, 467237, 560689, 672827, 807403, 968897, 1162687, 1395263,1674319, 2009191, 2411033, 2893249, 3471899, 4166287, 4999559, 5999471, 7199369};
+
+public static int GetPrime(int min) 
+{
+    if (min < 0)
+        throw new ArgumentException(Environment.GetResourceString("Arg_HTCapacityOverflow"));
+    Contract.EndContractBlock();
+ 
+    for (int i = 0; i < primes.Length; i++) 
+    {
+        int prime = primes[i];
+        if (prime >= min) return prime;
+    }
+ 
+    //outside of our predefined table. 
+    //compute the hard way. 
+    for (int i = (min | 1); i < Int32.MaxValue;i+=2) 
+    {
+        if (IsPrime(i) && ((i - 1) % Hashtable.HashPrime != 0))
+            return i;
+    }
+    return min;
+}
+```
+初始化Dictionary内部数组容器，`buckets`和`entries`，分别分配长度3。`size`哈希表的长度是质数，可以使元素更均匀地分布在每个节点上。`buckets`中的节点值-1表示空值。`freeList`为-1表示没有空链表。`buckets`和`freeList`所指向的数据其实全是存储于一块连续的内存空间`entries`之中。
+
+```c#
+public void Add(TKey key, TValue value) {
+    Insert(key, value, true);
+}
+
+private void Insert(TKey key, TValue value, bool add) {
+        
+            if( key == null ) {
+                ThrowHelper.ThrowArgumentNullException(ExceptionArgument.key);
+            }
+ 
+            if (buckets == null) Initialize(0);
+            int hashCode = comparer.GetHashCode(key) & 0x7FFFFFFF;
+            int targetBucket = hashCode % buckets.Length;
+ 
+#if FEATURE_RANDOMIZED_STRING_HASHING
+            int collisionCount = 0; // 碰撞计数
+#endif
+ 
+            for (int i = buckets[targetBucket]; i >= 0; i = entries[i].next) {
+                if (entries[i].hashCode == hashCode && comparer.Equals(entries[i].key, key)) { // 哈希值相同并且键相同
+                    if (add) { 
+                        ThrowHelper.ThrowArgumentException(ExceptionResource.Argument_AddingDuplicate); // 键重复
+                    }
+                    entries[i].value = value;
+                    version++;
+                    return;
+                } 
+ 
+#if FEATURE_RANDOMIZED_STRING_HASHING
+                collisionCount++;
+#endif
+            }
+
+            int index;
+            if (freeCount > 0) {
+                index = freeList;
+                freeList = entries[index].next;
+                freeCount--;
+            }
+            else {
+                if (count == entries.Length)
+                {
+                    Resize();
+                    targetBucket = hashCode % buckets.Length;
+                }
+                index = count;
+                count++;
+            }
+ 
+            entries[index].hashCode = hashCode;
+            entries[index].next = buckets[targetBucket];
+            entries[index].key = key;
+            entries[index].value = value;
+            buckets[targetBucket] = index;
+            version++;
+ 
+#if FEATURE_RANDOMIZED_STRING_HASHING
+ 
+#if FEATURE_CORECLR
+            // In case we hit the collision threshold we'll need to switch to the comparer which is using randomized string hashing
+            // in this case will be EqualityComparer<string>.Default.
+            // Note, randomized string hashing is turned on by default on coreclr so EqualityComparer<string>.Default will 
+            // be using randomized string hashing
+ 
+            if (collisionCount > HashHelpers.HashCollisionThreshold && comparer == NonRandomizedStringEqualityComparer.Default) 
+            {
+                comparer = (IEqualityComparer<TKey>) EqualityComparer<string>.Default;
+                Resize(entries.Length, true);
+            }
+#else
+            if(collisionCount > HashHelpers.HashCollisionThreshold && HashHelpers.IsWellKnownEqualityComparer(comparer)) 
+            {
+                comparer = (IEqualityComparer<TKey>) HashHelpers.GetRandomizedEqualityComparer(comparer);
+                Resize(entries.Length, true);
+            }
+#endif // FEATURE_CORECLR
+ 
+#endif
+ 
+}
+```
+1. 通过哈希函数寻址，计算出哈希地址（`buckets`的索引值）。
+2. 判断`buckets`中映射到的值是否为-1（即为空位）。若不为-1，表示有冲突，遍历冲突链，不允许重复的键。
+3. 判断是否有空链表，有则插入空链表的当前位置，将`freeList`指针后移，`freeCount`减一，否则将元素插入当前空位。在这一步，容量不足将自动扩容，若当前位置已经存在元素则将该元素的地址存在插入元素的next中，形成一个单链表的形式。
+
+```c#
+public bool Remove(TKey key) {
+    if(key == null) {
+        ThrowHelper.ThrowArgumentNullException(ExceptionArgument.key);
+    }
+ 
+    if (buckets != null) {
+        int hashCode = comparer.GetHashCode(key) & 0x7FFFFFFF;
+        int bucket = hashCode % buckets.Length;
+        int last = -1;
+        for (int i = buckets[bucket]; i >= 0; last = i, i = entries[i].next) {
+            if (entries[i].hashCode == hashCode && comparer.Equals(entries[i].key, key)) {
+                if (last < 0) {
+                    buckets[bucket] = entries[i].next;
+                }
+                else {
+                    entries[last].next = entries[i].next;
+                }
+                entries[i].hashCode = -1;
+                entries[i].next = freeList;
+                entries[i].key = default(TKey);
+                entries[i].value = default(TValue);
+                freeList = i;
+                freeCount++;
+                version++;
+                return true;
+            }
+        }
+    }
+    return false;
+}
+```
+
 
 ```c#
 // ==++==
@@ -153,15 +344,15 @@ namespace System.Collections.Generic {
             public TValue value;         // Value of entry
         }
  
-        private int[] buckets;
-        private Entry[] entries;
-        private int count;
-        private int version;
-        private int freeList;
-        private int freeCount;
-        private IEqualityComparer<TKey> comparer;
-        private KeyCollection keys;
-        private ValueCollection values;
+        private int[] buckets; // 内部维护的数据地址
+        private Entry[] entries; // 元素数组，用于维护哈希表中的数据
+        private int count; // 元素数量
+        private int version; 
+        private int freeList; // 空闲的列表
+        private int freeCount; // 空闲列表的元素数量
+        private IEqualityComparer<TKey> comparer; // 哈希表中的比较函数
+        private KeyCollection keys; // 键集合
+        private ValueCollection values; // 值集合
         private Object _syncRoot;
         
         // constants for serialization
@@ -396,7 +587,8 @@ namespace System.Collections.Generic {
             return -1;
         }
  
-        private void Initialize(int capacity) {
+        private void Initialize(int capacity) { 
+            // 根据构造函数设定的初始容量，获取一个近似的质数
             int size = HashHelpers.GetPrime(capacity);
             buckets = new int[size];
             for (int i = 0; i < buckets.Length; i++) buckets[i] = -1;
