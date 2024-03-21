@@ -130,10 +130,164 @@ void Screen::operator delete(void* p, size_t)
 
 ## Effective C++ 的实现
 
+```c++
+class Airplane {
+private:
+    struct AirplaneRep
+    {
+        //定义一个数据成员的结构体
+        unsigned long miles;
+        char type;
+    };
+private:
+    union { //定义一个共用体，用来作为当前类的成员
+        AirplaneRep rep;//当内存被分配时，将当前内存解释为AirplaneRep，作为数据成员使用
+        Airplane *next;//当处于内存池中时，将当前内存解释为指针，指向下一个内存块
+    };
+public:
+    unsigned long getMiles() {return rep.miles;}
+    char getType() {return rep.type;}
+    void set(unsigned long m, char t) {rep.miles = m; rep.type = t;}
+public:
+    static void *operator new(size_t size);
+    static void operator delete(void *deadObject, size_t size);
+private:
+    static const int BLOCK_SIZE;//一次性分配的内存
+    static Airplane* headOfFreeList;//内存池头节点指针
+};
+Airplane* Airplane::headOfFreeList;
+const int Airplane::BLOCK_SIZE = 512;
+```
 
+我们仍然先来看对类的定义，在上一种定义中，使用了一个指针和一个数据成员，这就意味着需要分配一个数据成员+一个指针的内存空间，但当使用时，指针的空间并没有被使用。在当前定义中，使用一个共用体，只分配一个数据成员的空间，当他在内存池中时，将该空间视为指针；当他被分配后，将该空间视为数据成员。
 
+当我们将内存分配出去之后，使用者不知道也不必知道这块内存曾经被解释为指针，他会从头开始复写内存块中的内存，这样就为每一块内存空间省下来一个指针的空间。
 
+```c++
+void* Airplane::operator new(size_t size)
+{
+    //若所需要分配的大小有误时，就转交给::operator new()
+    if (size != sizeof(Airplane))
+    {
+        return ::operator new(size);
+    }
 
+    Airplane *p = headOfFreeList;
+    if (p)
+    {
+        //如果内存池不为空，就将头指针后移
+        headOfFreeList = p->next;
+    } else
+    {
+        //若内存池为空
+        Airplane *newBlock = static_cast<Airplane*>(::operator new((BLOCK_SIZE) * sizeof(Airplane)));
+        //将他分割成小块，连接成链表
+        //但跳过0，将他作为本次分配的结果交付
+        for (int i = 1; i < BLOCK_SIZE - 1; i++)
+        {
+            newBlock[i].next = &newBlock[i + 1];
+        }
+        newBlock[BLOCK_SIZE - 1].next = 0;
+        p = newBlock;
+        headOfFreeList = &newBlock[1];
+    }
+    return p;
+}
+```
+这里的operator new()所做的事情和上一个相同，但是为什么要考虑需要分配的内存会不等于当前类的大小呢？当发生继承时。
+
+```c++
+void Airplane::operator delete(void *deadObject, size_t size)
+{
+    if (deadObject == 0) return;
+    if (size != sizeof(Airplane))
+    {
+        ::operator delete(deadObject);
+        return;
+    }
+    Airplane *carcass = static_cast<Airplane*>(deadObject);
+    carcass->next = headOfFreeList;
+    headOfFreeList = carcass;
+}
+```
+
+## 问题分析
+
+这种实现方式解决了对指针空间的利用，但是释放的时候仍然没有将空间归还给OS，也没有解决对每一种类都得去重写一遍代码的问题。
+
+## 实现内存分配重载在多个类中的复用
+
+```c++
+class myAllocator {
+public:
+    void* allocate(size_t);//分配内存
+    void deallocate(void*, size_t);//回收内存
+private:
+    struct obj {
+        struct obj* next;
+    };
+    obj* freeStore = nullptr;//指向内存池的可用位置的第一个位置
+    const int CHUNK = 5;//每次分配的大小
+};
+void* myAllocator::allocate(size_t size)
+{
+    obj* p;
+    if (!freeStore)
+    {
+        //当链表为空
+        size_t chunk = CHUNK * size;
+        freeStore = p = (obj*)malloc(chunk); //分配内存
+        //将其分割成链表
+        for (int i = 0; i < CHUNK - 1; i++)
+        {
+            p->next = (obj*)((char*)p + size);
+            p = p->next;
+        }
+        p->next = nullptr;
+    }
+    p = freeStore;
+    freeStore = freeStore->next;
+    return p;
+}
+void myAllocator::deallocate(void* p, size_t size)
+{
+    //回收内存
+    ((obj*)p)->next = freeStore;
+    freeStore = ((obj*)p);
+}
+```
+使用方法举例：
+
+```c++
+class foo {
+public:
+    foo(int i) : x(i), y(i) {}
+    int x;
+    int y;
+    static myAllocator myAlloc;// 内存分配器
+
+    static void *operator new(size_t size)
+    {
+        return myAlloc.allocate(size);
+    }
+    static void operator delete(void* loc, size_t size)
+    {
+        return myAlloc.deallocate(loc, size);
+    }
+};
+```
+
+## 问题分析
+
+上面三种方法最后也没有解决回收的内存没有归还于OS，而是单纯在内存池中。
+
+那是否可以解决呢？
+
+首先在归还内存块的时候，并不会按照顺序归还，所以在内存链表中，内存块之间的连接是混乱的，我们无法有效的找到一个方法去判断相连的内存是否已经全部被归还。
+
+同时由于分配出的内存块已经排除了cookie，而编辑器调用free去归还内存的动作也依赖于cookie，所以也没有办法在归还时直接调用free。
+
+此外，由于链表的多次连接与分配，我们已经不能找到最开始分配内存时所用的指针，所以，即使我们知道了全部的内存空间都已经归还至了内存池，也无法找到最开始的那根指针而对其使用free。
 
 
 # SGI STL 特殊配置器（std::alloc）
