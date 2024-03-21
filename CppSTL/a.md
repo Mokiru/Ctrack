@@ -9,6 +9,156 @@
 
 Container通过Allocator取得数据储存空间，Algorithm通过Iterator存取Container内容，Functor可以协助Algorithm完成不同的策略变化，Adapter可以修饰或套接Functor。
 
+# std::alloc
+
+## 内存分配模型
+
+### 重载new和delete操作的目的
+
+C++提供的默认版本的new和delete运算符，无法在他们执行操作之前，对被操作的对象的数据成员执行一些自定义的逻辑操作，那么我们此时就要考虑重载C++中的new操作符和delete操作符，它们操作符可以全局重载，也可以在特定类中重载。
+
+1. 可以在重载新的运算符功能中添加异常处理。
+2. 希望自定义运算符delete，以用0覆盖被回收的堆内存块，以提高应用程序数据的安全性。
+3. 重载new操作符可以在其内部定义C版本的malloc或realloc函数进行对象的堆内存分配，然而C++并不建议如此做，因为这样已经绕过了标准库中默认的内存分配器的内存管理机制。
+4. 同理delete操作也可以在其重载版本中定义C版本的free()函数，同样C++不建议如此做。
+
+new/delete操作符的作用域
+- 如果使用某个类的成员函数来重载这些运算符，则意味着这些运算符仅针对该特定类才被重载。
+- 如果重载是在类外完成的（即它不是类的成员函数），则只要您使用这些运算符（在任何地方）都将调用重载的“new”和“delete”。
+
+以下是new操作符函数的原型：
+```c++
+void* operator new(size_t size);
+```
+
+以下是delete操作符函数的原型：delete操作符必须匹配一个void*类型的参数，函数返回的类型是void，并且默认情况下，重载后的new和delete操作符函数都是静态成员，因此在函数内部是无法使用this指针。
+```c++
+void operator delete(void*);
+```
+该函数接收一个必须删除的void*类型的参数，函数不应该返回任何东西。
+默认情况下，重载的new和delete运算符函数都是静态成员，因此，他们无权访问this指针。
+
+## 内存池
+
+我们无法改变malloc的动作，这也意味着我们无法改变每次调用malloc都会产生额外开销，所以，我们去进行优化的方法就只能是减少对malloc的调用次数。
+
+```c++
+void* malloc(int size);
+```
+
+实现方法：
+1. 在第一次分配内存时，调用malloc一次性分配一大块内存，称为内存池。
+2. 当需要分配内存时，首先检查内存池是否有足够的容量，如果有就直接从内存池中为其分配内存，若不存在则调用malloc为内存池再补充一大块内存。
+3. 当已经被分配出的内存释放时，将它归还于内存池。
+
+如此，我们可以很简单的减少了malloc的调用次数，尽管每一次调用malloc都会产生额外的开销，但相比直接调用malloc会优化很多。
+
+## 具体实现
+
+```c++
+class Screen {
+public:
+    Screen(int x) : i(x) {}
+    int get() {return i;}
+
+    void* operator new(size_t);
+    void operator delete(void*, size_t);
+private:
+    Screen *next;//指向下一块可用内存
+    static Screen* freeStore;//内存池头节点指针
+    static const int screenChunk;//每次分配的数量
+private:
+    int i;
+};
+Screen* Screen::freeStore = 0;
+const int Screen::screenChunk = 24;
+```
+
+首先分析这个类的定义：
+1. 构造函数，数据成员i和方法get，这三个成员无关紧要。
+2. 重载了new和delete，很明显我们要改变new行为就只能通过重载这两个函数。
+3. 一个指向本体的指针：当当前成员还在内存池中时，用于连接下一块内存。
+4. 一个指向内存池头节点的指针：指向所维护的内存池的第一个可用内存。
+5. 一个代表每次分配的数量的int，也就是每次调用malloc所一次性分配的大小。
+
+```c++
+void* Screen::operator new(size_t size)
+{
+    Screen *p;
+    if (!freeStore)
+    {
+        //当链表为空时， 申请内存
+        size_t chunk = screenChunk * size; // 计算需要分配的大小
+        //分配内存并将指针转型
+        freeStore = p = reinterpret_cast<Screen*>(new char[chunk]);
+        //将这一大片内存分割，当作链表串联起来
+        for (; p!= &freeStore[screenChunk - 1]; ++p)
+            p->next = p + 1;
+        p->next = 0;//将整个内存池链表最后设为0
+    }
+    p = freeStore; //取出内存池开头的一块内存
+    freeStore = freeStore->next;//头指针后移
+    return p;
+}
+```
+
+接着，我们分析对于内存分配的动作：
+1. 当freeStore为空时，也就证明当前内存池为空，那么就分配一大块内存给内存池。
+2. 分配之后，得到一大块内存用之前定义的next指针串联在一起，这样就完成了逻辑上的分割，虽然物理上它们可能是相连的，但是只要我们分配的时候使用next指针，就能保证一块一块的分配出去。
+3. 当freeStore不为空时（本身就不为空或已经分配了内存），就取出内存池的第一块内存给p，并且将头指针后移，然后返回p。
+
+这也就是我们得到的内存池，头节点由freeStore指向，尾节点的next为0；
+
+```c++
+//重载的delete方法
+void Screen::operator delete(void* p, size_t)
+{
+    //将当前内存块的头指针指向可用内存链表的开头
+    (static_cast<Screen*>(p))->next = freeStore;
+    freeStore = static_cast<Screen*>(p);
+}
+```
+
+当已经分配出去的内存使用结束被delete时，我们将他再次连接到内存池的开头，这样就完成了归还动作。
+
+
+
+
+
+
+
+# SGI STL 特殊配置器（std::alloc）
+
+![alt text](image-5.png)
+
+```c++
+template<class T, class Alloc>
+class simple_alloc 
+{
+public:
+    static T* allocate(std::size_t n)
+    {
+        return 0==n ? 0 : (T*)Alloc::allocate(n * sizeof(T));
+    }
+    static T* allocate(void)
+    {
+        return (T*)Alloc::allocate(sizeof(T));
+    }
+    static void deallocate(T* p, size_t n)
+    {
+        if (n != 0)
+        {
+            Alloc::deallocate(p, n * sizeof(T));
+        }
+    }
+
+    static void deallocate(T* p)
+    {
+        Alloc::deallocate(p, sizeof(T));
+    }
+};
+```
+
 # 序列式容器
 
 ## vector
