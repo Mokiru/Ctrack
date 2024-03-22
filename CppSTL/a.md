@@ -11,6 +11,380 @@ Container通过Allocator取得数据储存空间，Algorithm通过Iterator存取
 
 # std::alloc
 
+## std::alloc的两层分配器
+
+- 第一级的作用处理申请超过最大可挂载的内存块容量（大于128字节）的内存。
+- 第二级的作用是完成std::alloc对内存的分配。
+
+在C++中new是调用`::operator new();`分配内存的，再调用赋值函数`construct();`释放的流程是`destroy();`，`::operator delete();`释放内存。
+
+```c++
+//调用构造函数
+template<class T1, class T2>
+inline void construct(T1* p, const T2& value)
+{
+    new (p) T1(value); // 在地址p处构造T1对象值为value
+}
+//调用析构函数
+template<class T>
+inline void destroy(T* pointer)
+{
+    pointer->~T();
+}
+
+template<int inst>
+class cnew_alloc {
+public:
+    //需要这个来正确封装simple_alloc
+    typedef char value_type;
+    //分配内存
+    static void* allocate(size_t n)
+    {
+        return 0 == n ? 0 : ::operator new(n);
+    }
+
+    static void* reallocate(void* p, size_t old_sz, size_t new_sz)
+    {
+        void* result = allocate(new_sz);
+        size_t copy_sz = new_sz > old_sz ? old_sz : new_sz;
+        memcpy(result, p, copy_sz);// 将[p, p + copy_sz) 复制到result
+        deallocate(p, old_sz);
+        return result;
+    }
+
+    static void deallocate(void* p)
+    {
+        ::operator delete(p);
+    }
+
+    static void deallocate(void* p, size_t)
+    {
+        ::operator delete(p);
+    }
+
+};
+```
+
+其实new实际也是调用malloc函数
+
+## STL中分配内存alloc
+
+STL中有一级分配内存和二级分配内存
+
+一级分配内存就是使用malloc分配内存的，当前申请的内存大于128字节时就是使用malloc分配内存，当小于128个字节就是使用内存池。
+
+### 二级分配
+
+在内存池中维护16个内存块链表和还有被内存块使用的备用内存。
+
+16个内存块分别从8~128，每一个间隔8字节，都是8的整数倍，内存对齐中使用&~运算符是对需要内存进行内存调整到8的倍数。
+
+例如：
+```c++
+// 31 -> 32
+0001 0111 ===> (0001 0111 + 0111) &~(0111) ===> 0010 0000 == 32
+static size_t round_up(size_t bytes)
+{
+    return (bytes + (7)) &~ (7);
+}
+```
+16个数组是维持16种内存块的链表：
+![alt text](image-6.png)
+
+但是它分配内存块40k内存节点是分配20个，800k是给数组中下标4中的链表管理19个节点40k的内存，但是实际申请的1600k，还有800k留给内存池管理了，当你在申请内存32k，实际就会到内存池中拿出640k给数组下标3管理。
+
+```c++
+#ifndef CSTL_SOURCE_CALLOC_MEM_POOL_H
+#define CSTL_SOURCE_CALLOC_MEM_POOL_H
+
+#include "cmalloc_alloc.h"
+#include <mutex>
+namespace chen {
+
+    union cnode_alloc_obj;
+    union cnode_alloc_obj
+    {
+        union cnode_alloc_obj* free_list_link;
+        char client_data[1]; // info address 
+    };
+
+
+    template <bool trheads, int inst>
+    class calloc
+    {
+    public:
+        // this one is needed for proper simple_alloc wrapping
+        typedef char value_type;
+        typedef cnode_alloc_obj obj;
+    public:
+
+        //内存对齐最小字节
+        enum {__ALIGN = 8};
+        // 内存池中最大内存节点 128
+        enum {__MAX_BYTES = 128};
+        // 内存
+        enum {__NFREELISTS = __MAX_BYTES/__ALIGN};
+    private:
+        // 内存字节对齐 8的倍数
+        static size_t  round_up(size_t bytes)
+        {
+            return ((bytes + __ALIGN -1) & ~(__ALIGN -1));
+        }
+        // 内存字节数组的下标
+        static size_t free_list_index(size_t bytes)
+        {
+            return ((bytes + __ALIGN -1)/__ALIGN -1);//
+        }
+        //
+        static void *refill(size_t n);
+
+        static char * chunk_alloc(size_t size, int & nobjes);
+
+        // Chunk allocation state.
+        static char *start_free;
+        static char *end_free;
+        static size_t heap_size;
+    public:
+        /* n must be > 0      */
+        static void * allocate(size_t n);
+        /* p may not be 0 */
+        static void deallocate(void *p, size_t n);
+        static void * reallocate(void *p, size_t old_sz, size_t new_sz);
+        static void show_info()
+        {
+            printf("mem_pool node size = %llu\n", (size_t)(end_free - start_free));
+            printf("mem_pool use size = %llu\n", m_use_size);
+            printf("mem_pool size = %llu\n", heap_size);
+        }
+    private :
+        static obj *  free_list[__NFREELISTS];
+        static  std::mutex m_lock;
+        static size_t  m_use_size;
+    };
+
+
+
+    typedef calloc<false, 0 > csingle_client_alloc;
+    typedef calloc<true, 0 >  cmultithreaded_alloc;
+
+
+    template <bool threads, int inst>
+    inline void * calloc<threads,inst>::allocate(size_t n)
+    {
+        obj **  my_free_list;
+        obj *  result;
+
+        m_use_size +=n;
+        if (n > (size_t)__MAX_BYTES)
+        {
+            return(malloc_alloc::allocate(n));
+        }
+        printf("allocate index = %llu\n", free_list_index(n));
+        my_free_list = free_list + free_list_index(n);
+        // Acquire the lock here with a constructor call.
+        // This ensures that it is released in exit or during stack
+        // unwinding.
+        /*REFERENCED*/
+        if (threads)
+        {
+            m_lock.lock();
+        }
+        result = *my_free_list;
+        if (result == 0)
+        {
+            void *r = refill(round_up(n));
+            return r;
+        }
+        *my_free_list = result -> free_list_link;
+        if (threads)
+        {
+            m_lock.unlock();
+        }
+        return (result);
+    }
+    template <bool threads, int inst>
+    inline void calloc<threads, inst>::deallocate(void *p, size_t n)
+    {
+        obj *q = (obj *)p;
+        obj  ** my_free_list;
+
+        m_use_size -=n;
+        if (n > (size_t)__MAX_BYTES)
+        {
+
+            malloc_alloc::deallocate(p, n);
+            return;
+        }
+        printf("deallocate  index = %llu\n", free_list_index(n));
+        my_free_list = free_list + free_list_index(n);
+        // acquire lock
+
+        if (threads)
+        {
+            m_lock.lock();
+        }
+        q->free_list_link = *my_free_list;
+        *my_free_list = q;
+        // lock is released here
+        if (threads)
+        {
+            m_lock.unlock();
+        }
+    }
+
+
+
+
+/* We allocate memory in large chunks in order to avoid fragmenting     */
+/* the malloc heap too much.                                            */
+/* We assume that size is properly aligned.                             */
+/* We hold the allocation lock.                                         */
+    template <bool threads, int inst>
+    char* calloc<threads, inst>::chunk_alloc(size_t size, int& nobjs)
+    {
+        char * result;
+        size_t total_bytes = size * nobjs;
+        size_t bytes_left = end_free - start_free;
+
+        if (bytes_left >= total_bytes)
+        {
+            result = start_free;
+            start_free += total_bytes;
+            return(result);
+        }
+        else if (bytes_left >= size)
+        {
+            nobjs = bytes_left/size;
+            total_bytes = size * nobjs;
+            result = start_free;
+            start_free += total_bytes;
+            return(result);
+        }
+        else
+            {
+                // 这边 heap_size  >> 4 ====> 扩容作准备的  内存池
+            size_t bytes_to_get = 2 * total_bytes + round_up(heap_size >> 4);
+            // Try to make use of the left-over piece.
+            if (bytes_left > 0)
+            {
+                obj  ** my_free_list = free_list + free_list_index(bytes_left);
+
+                ((obj *)start_free) -> free_list_link = *my_free_list;
+                *my_free_list = (obj *)start_free;
+            }
+            start_free = (char *)malloc_alloc::allocate(bytes_to_get);
+            if (0 == start_free)
+            {
+                int i;
+                obj  ** my_free_list;
+                obj *p;
+                // Try to make do with what we have.  That can't
+                // hurt.  We do not try smaller requests, since that tends
+                // to result in disaster on multi-process machines.
+                for (i = size; i <= __MAX_BYTES; i += __ALIGN)
+                {
+                    my_free_list = free_list + free_list_index(i);
+                    p = *my_free_list;
+                    if (0 != p)
+                    {
+                        *my_free_list = p -> free_list_link;
+                        start_free = (char *)p;
+                        end_free = start_free + i;
+                        return(chunk_alloc(size, nobjs));
+                        // Any leftover piece will eventually make it to the
+                        // right free list.
+                    }
+                }
+                end_free = 0;	// In case of exception.
+                start_free = (char *)malloc_alloc::allocate(bytes_to_get);
+                // This should either throw an
+                // exception or remedy the situation.  Thus we assume it
+                // succeeded.
+            }
+            heap_size += bytes_to_get;
+            end_free = start_free + bytes_to_get;
+            return(chunk_alloc(size, nobjs));
+        }
+    }
+
+/* Returns an object of size n, and optionally adds to size n free list.*/
+/* We assume that n is properly aligned.                                */
+/* We hold the allocation lock.                                         */
+    template <bool threads, int inst>
+    void* calloc<threads, inst>::refill(size_t n)
+    {
+        int nobjs = 20;
+        char * chunk = chunk_alloc(n, nobjs);
+        obj  *  * my_free_list;
+        obj * result;
+        obj * current_obj, * next_obj;
+        int i;
+
+        if (1 == nobjs)
+        {
+            return(chunk);
+        }
+        my_free_list = free_list + free_list_index(n);
+
+        /* Build free list in chunk */
+        // node list -->>>>>>  8 * ? = 128
+        result = (obj *)chunk;
+        *my_free_list = next_obj = (obj *)(chunk + n);
+        for (i = 1; ; i++)
+        {
+            current_obj = next_obj;
+            next_obj = (obj *)((char *)next_obj + n);
+            if (nobjs - 1 == i)
+            {
+                current_obj -> free_list_link = 0;
+                break;
+            }
+            else
+                {
+                current_obj -> free_list_link = next_obj;
+            }
+        }
+        return(result);
+    }
+
+    template <bool threads, int inst>
+    void* calloc<threads, inst>::reallocate(void *p, size_t old_sz, size_t new_sz)
+    {
+        void * result;
+        size_t copy_sz;
+
+        if (old_sz > (size_t) __MAX_BYTES && new_sz > (size_t) __MAX_BYTES)
+        {
+            return(malloc_alloc::reallocate(p, old_sz, new_sz));
+        }
+        if (round_up(old_sz) == round_up(new_sz))
+        {
+            return(p);
+        }
+        result = allocate(new_sz);
+        copy_sz = new_sz > old_sz? old_sz : new_sz;
+        ::memcpy(result, p, copy_sz);
+        deallocate(p, old_sz);
+        return(result);
+    }
+
+    template <bool threads, int inst>
+    char *calloc<threads, inst>::start_free = 0;
+
+    template <bool threads, int inst>
+    char *calloc<threads, inst>::end_free = 0;
+
+    template <bool threads, int inst>
+    size_t calloc<threads, inst>::heap_size = 0;
+    template <bool threads, int inst>
+    size_t calloc<threads, inst>::m_use_size = 0;
+    template <bool threads, int inst>
+    cnode_alloc_obj * calloc<threads, inst>::free_list[__NFREELISTS] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+
+}
+#endif //CSTL_SOURCE_CALLOC_MEM_POOL_H
+```
+
 ## 内存分配模型
 
 ### 重载new和delete操作的目的
