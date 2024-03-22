@@ -130,7 +130,7 @@ namespace chen {
         {
             return ((bytes + __ALIGN -1) & ~(__ALIGN -1));
         }
-        // 内存字节数组的下标
+        // 内存字节数组的下标 向上取整 33 -> 下标6 40
         static size_t free_list_index(size_t bytes)
         {
             return ((bytes + __ALIGN -1)/__ALIGN -1);//
