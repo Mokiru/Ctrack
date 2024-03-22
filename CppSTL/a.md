@@ -1260,4 +1260,360 @@ class list
 
 ## deque
 
+![alt text](image-7.png)
+
+上面就是deque的示例图，deque和vector的最大差异在于deque允许常数时间内对头端或尾端进行元素的插入和移除操作。
+
+二在于deque没有所谓的容量概念，因为它是动态地以分段连续空间组合而成随时可以增加一块新的空间拼接起来。
+
+虽然deque也提供了随机访问迭代器，但是它的迭代器和前面两种都不一样，其设计比较复杂，因此会对各种运算产生一定的影响，除非必要尽可能选择使用vector而非deque。
+
+### deque的中控器
+
+deque在逻辑上看起来是连续空间，内部是由一段一段的定量连续空间构成。一旦有必要在deque的前端或尾端增加新空间，便配置一定量的连续空间，串接在整个deque的头部或尾部。
+
+而这最大的挑战就是在这些分段的定量连续空间上，维护其逻辑上的整体连续，并提供随机存取的接口，从而避开像vector那样的“重新配置-赋值-释放”，这样一来虽然开销降低，但是也提高了复杂的迭代器结构。
+
+因此数据结构的设计和迭代器前进和后退等操作都非常复杂。
+
+deque采用一块所谓的map（不是map容器）作为中控器，其实就是一小块连续空间，其中每个元素都是指针，指向另外一段较大的连续线性空间，称之为**缓冲区**。在后面我们看到，缓冲区才是deque的存储空间主体。
+
+```c++
+#ifndef __STL_NON_TYPE_TMPL_PARAM_BUG
+template<class T, class Ref, class Ptr, size_t BufSiz>
+class deque {
+public:
+    typedef T value_type;
+    typedef value_type* pointer;
+    ...
+protected:
+    typedef pointer** map_pointer;
+    map_pointer map;
+    size_type map_size;
+    ...
+};
+
+```
+
+其示例图如下：deque的结构设计中，map和node-buffer的关系如下
+![alt text](image-8.png)
+
+### deque的迭代器
+
+deque是分段连续空间，维持其逻辑“整体连续”的任务，就靠它的迭代器来实现，也就是`operator++`和`operator--`两个运算上面。
+
+我们可以思考一下，如果让你来设计，你觉得deque的迭代器应该具备什么样的结构和功能呢？
+
+首先第一点，我们能想到的是，既然是分段连续，那么迭代器应该能够指出当前的连续空间在哪里；
+
+其次，第二点因为缓冲区有边界，迭代器还应该要能判断，当前是否处于所在缓冲区的边缘，如果是，一旦前进或后退，就必须跳转到上一个或下一个缓冲区；
+
+第三点，也即是实现前面两种情况的前提下，迭代器必须能随时控制中控器。
+
+```c++
+template<class T, class Ref, class Ptr, size_t BufSiz>
+struct __deque_iterator {
+    //迭代器定义
+    typedef __deque_iterator<T, T&, T*, BufSiz> iterator;
+    typedef __deque_iterator<T, const T&, const T*, BufSiz> const_iterator;
+    static size_t buffer_size() 
+    {return __deque_buf_size(BufSiz, sizeof(T));}
+    //deque是random_access_iterator_tag类型 即随机访问迭代器
+    typedef random_access_iterator_tag iterator_category;
+    //基本类型的定义，满足traits编程
+    typedef T value_type;
+    typedef Ptr pointer;
+    typedef Ref reference;
+    typedef size_t size_type;
+    typedef ptrdiff_t difference_type;//指针之间距离
+    //node
+    typedef T** map_pointer;
+    map_pointer node;
+    typedef __deque_iterator self;
+    ...
+};
+```
+
+deque的每一个缓冲区设计了三个迭代器（为什么呢）
+```c++
+struct __deque_iterator {
+    ...
+    typedef T value_type;
+    T* cur;
+    T* first;
+    T* last;
+    typedef T** map_pointer;
+    map_pointer node;
+    ...
+};
+```
+回到之前所说的，因为它是分段连续的空间，下图描绘了deque的中控器，缓冲区，迭代器之间的相互关系。
+
+![alt text](image-9.png)
+
+如图，每一段都指向一个缓冲区buffer，而缓冲区是需要知道每个元素的位置的，所以需要这些迭代器去访问。
+
+其中cur表示当前所指位置，first表示当前数组中头部位置，last表示尾部位置。
+
+这样就方便管理很多，需要注意deque的空间是由map管理的，它是一个指向指针的指针，所以三个参数都是指向当前的数组，但这样的数组可能有多个，只是每个数组都管理这3个变量。
+
+那么，缓冲区的大小是谁来决定的呢？用来决定缓冲区大小的是一个全局函数。
+
+```c++
+inline size_t __deque_buf_size(size_t n, size_t sz) {
+    return n!=0 ? n : (sz < 512 ? size_t(512 / sz) : size_t(1));
+}
+// 如果 n 不为 0 则返回n，表示缓冲区大小由用户自定义
+// 如果 n == 0 表示缓冲区大小默认值
+// 如果 sz = （元素大小sizeof(value_type)）小于 512 则返回 512/sz
+// 如果 sz 不小于512 则返回 1
+```
+假设我们现在构造了一个int类型的deque，设置缓冲区大小等于32，这样一来，每个缓冲区可以容纳32/sizeof(int)=8个元素，经过一番操作后，deque现在有了20个元素了，那么成员函数begin()和end()返回的两个迭代器该是怎么样的呢？
+
+![alt text](image-10.png)
+
+20个元素需要20/8 = 3个缓冲区，所以map运用了3个节点，迭代器start内的cur指针指向缓冲区第一个元素，迭代器finish内的cur指针指向缓冲区的最后一个元素（的下一个位置）。
+
+注意，最后一个缓冲区尚有备用空间，如果之后还有新元素插入，则直接插入到备用空间。
+
+### deque迭代器的操作
+
+前进和后退
+
+`operator++`操作代表是需要切换到下一个元素，这里需要先切换再判断是否已经到达缓冲区的末尾。
+
+```c++
+self& operator++() {
+    ++cur; //切换到下一个元素
+    if (cur == last) { //如果已经到达所在缓冲区的末尾
+        set_node(node+1);//切换下一个节点
+        cur = first;
+    }
+    return *this;
+};
+```
+
+`operator--`操作代表切换到上一个元素所在的位置，需要先判断是否到达缓冲区的头部。
+```c++
+self& operator--() {
+    if (cur == first)
+    {
+        set_node(node - 1);
+        cur = last;
+    }
+    --cur;
+    return *this;
+}
+```
+
+### deque的构造和析构函数
+
+构造函数，有多个重载函数，接受大部分不同的参数类型，基本上每一个构造函数都会调用`create_map_and_nodes`，这就是构造函数的核心。
+
+```c++
+template<class T, class Alloc = alloc, size_t BufSiz = 0>
+class deque {
+    ...
+public:
+    deque() : start(), finish(), map(0), map_size(0) {
+        create_map_and_nodes(0);
+    }//默认构造函数
+    deque(const deque& x) :start(), finish(), map(0),  map_size(0) {
+        create_map_and_nodes(x.size());
+        __STL_TRY {
+            uninitialized_copy(x.begin(), x.end(), start);
+        }
+        __STL_UNWIND(destroy_map_and_nodes());
+    }
+    //接受n:初始化大小，value初始化的值
+    deque(size_type n, const value_type& value): start(), finish(), map(0), map_size(0) {
+        fill_initialize(n, value);
+    }
+    deque(int n, const value_type& value): start(), finish(), map(0), map_size(0) {
+        fill_initialize(n, value);
+    }
+    deque(long n, const value_type& value): start(), finish(), map(0), map_size(0) {
+        fill_initialize(n, value);
+    }
+    ...
+};
+```
+
+下面我们来学习一下deque的中控器是如何配置的
+
+```c++
+void deque<T, Alloc, BufSize>::create_map_and_nodes(
+    size_type num_elements) 
+{
+    //需要节点数=(每个元素/每个缓冲区可容纳元素个数+1)
+    //如果正好整除，多配一个节点
+    size_type num_nodes = num_elements / buffer_size() + 1;
+    //一个map要管理几个节点，最少8个，最多是需要节点数+2
+    map_size = max(initial_map_size(), num_nodes + 2);
+    map = map_allocator::allocate(map_size);
+    //计算出数组的头前面留出来的位置保存并在nstart
+    map_pointer nstart = map + (map_size - num_nodes) / 2;
+    map_pointer nfinish = nstart + num_nodes - 1;
+    map_pointer cur;//指向所拥有大的节点的最中央位置
+    ...
+}
+
+```
+注意看，deque的begin和end不是一开始就指向map中控器里开始和结尾的，**而是指向所拥有的节点最中央的位置。**
+
+这样带来的好处是可以使得头尾两边扩充的可能性一样大，换句话说，因为deque是头尾插入删除都是O(1)所以deque再头和尾都留有空间方便头尾插入。
+
+那么，什么时候map中控器本身需要调整大小呢？触发条件在于`reverse_map_at_back`和`reverse_map_at_front`这两个函数来判断，实际操作由`reallocate_map`来执行
+
+那么`reallocate_map`又是如何操作的呢？
+
+```c++
+// 如果map尾端的节点备用空间不足，符合条件就配置一个新的map(配置更大的，拷贝原来的，释放原来的)
+void reverse_map_at_back(size_type nodes_to_add = 1)
+{
+    if (nodes_to_add + 1 > map_size - (finish.node - map))
+    {
+        reallocate_map(nodes_to_add, false);
+    }
+}
+// 如果map前端的节点备用空间不足，符合条件就配置一个新的map（配置更大的，拷贝原来的，释放原来的）
+void reverse_map_at_front(size_type nodes_to_add = 1)
+{
+    if (nodes_to_add > start.node - map)
+    {
+        reallocate_map(nodes_to_add, true);
+    }
+}
+```
+
+### deque的插入元素和删除元素
+
+因为deque的是能够双向操作，所以其push和pop操作都类似于list都可以直接有对应的操作，需要注意的是list是链表，并不会涉及到界线的判断，而deque是由数组来存储的，就需要对边界判断。
+
+push实现
+
+```c++
+template<class T, class Alloc = alloc, size_t BufSiz = 0>
+class deque {
+    ...
+public:
+    //对尾进行插入
+    //判断函数是否达到了数组尾部，没有达到就直接进行插入
+    void push_back(const value_type& t)
+    {
+        if (finish.cur != finish.last - 1)
+        {
+            construct(finish.cur, t);
+            ++finish.cur;
+        } else
+        {
+            push_back_aux(t);
+        }
+    }
+    //对头进行插入
+    //判断函数是否达到了数组头部，没有达到就直接进行插入
+    void push_front(const value_type& t)
+    {
+        if (start.cur != start.first)
+        {
+            construct(start.cur - 1, t);
+            --start.cur;
+        } else
+        {
+            push_front_aux(t);
+        }
+    }
+    ...
+};
+```
+
+pop实现
+
+```c++
+template<class T, class Alloc = alloc, size_t BufSize = 0>
+class deque {
+    ...
+public:
+    //对尾部进行操作
+    // 判断是否达到数组的头部，没有就直接释放
+    void pop_back() {
+        if (finish.cur != finish.first)
+        {
+            --finish.cur;
+            destory(finish.cur);
+        } else
+        {
+            pop_back_aux();
+        }
+    }
+    //对头部进行操作
+    //判断是否达到数组的尾部，没有达到就直接释放
+    void pop_front()
+    {
+        if (start.cur != start.last - 1)
+        {
+            destroy(start.cur);
+            ++start.cur;
+        } else
+        {
+            pop_front_aux();
+        }
+    }
+    ...
+};
+```
+
+`reverse_map_at`一类函数，pop和push都先调用了`reverse_map_at_XX`函数，这些函数主要是为了判断前后空间是否足够。
+
+### 删除操作
+
+不知道还记得，最开始构造函数调用`create_map_and_nodes`函数，考虑到deque实现前后插入时间复杂度为O(1)，保证了在前后留出了空间，所以push和pop都可以在前面的数组进行操作。
+
+现在就来看erase，因为deque是由数组构成，所以地址空间是连续的，删除也就像vector一样，要移动所有的元素。
+
+deque为了保证效率尽可能的高，就判断删除的位置是中间偏后还是中间偏前来进行移动。
+
+```c++
+template<class T, class Alloc = alloc, size_t BufSiz = 0>
+class deque {
+    ...
+public:
+    iterator erase(iterator pos)
+    {
+        iterator next = pos;
+        ++next;
+        difference_type index = pos - start;
+        //删除的是中间偏前，移动前面的元素
+        if (index < (size() >> 1))
+        {
+            copy_backward(start, pos, next);
+            pop_front();
+        }
+        //删除的地方是中间偏后，移动后面的元素
+        else
+        {
+            copy(next, finish, pos);
+            pop_back();
+        }
+        return start + index;
+    }
+    // 范围删除，实际上也是调用上面的erase函数。
+    iterator erase(iterator first, iterator last);
+    void clear();
+    ...
+};
+```
+
+最后是insert函数，deque源码的基本每一个insert重载函数都会调用了insert_auto判断插入的位置离头还是尾比较近
+
+如果离头近：则先将头往前移动，调整将要移动的距离，用copy进行调整。
+
+如果离尾近：则将尾往前移动，调整将要移动的距离，用copy进行调整。
+
+### 以deque为底层容器的适配器
+
+- 栈stack
+- 队列queue
+- 优先队列priority_queue以vector为容器，heap为数据操作的配置器
+
 # 关联式容器
