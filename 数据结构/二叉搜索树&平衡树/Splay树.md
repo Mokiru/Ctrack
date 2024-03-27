@@ -87,6 +87,24 @@ Splay操作即对$x$做一系列splay步骤，每次对$x$做一次splay步骤�
 即直接将$x$左旋或右旋。
 ![alt text](image-7.png)
 ![alt text](image-8.png)
-2. 
+2. zig-zig：在$p$不是根节点且$x$和$p$都是右侧子节点或都是左侧子节点时操作，下方例图显示了$x$和$p$都是左侧子节点时的情况。Splay树首先按照连接$p$与其父节点$g$边旋转，然后按照连接$x$和$p$的边旋转。
+![alt text](image-9.png)
+即首先将$g$左旋或右旋，然后将$x$右旋或左旋。
+![alt text](image-10.png)
+![alt text](image-11.png)
+3. zig-zag：在$p$不是根节点且$x$和$p$一个是右侧子节点一个是左侧子节点时操作。Splay树首先按$p$和$x$之间的边旋转，然后按$x$和$g$新生成的结果边旋转。
+![alt text](image-12.png)
+即将$x$先左旋再右旋，或先右旋再左旋。
+![alt text](image-13.png)
+![alt text](image-14.png)
+
+
+
+
+
+
+
+
+
 
 
