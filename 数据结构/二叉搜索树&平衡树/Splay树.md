@@ -59,7 +59,7 @@ void clear(int x) {
 3. 如果原来的$y$还有父亲$z$,那么把$z$的某个儿子（原来$y$所在的儿子位置）指向$x$，且$x$的父亲指向$z$。`fa[x]=z;if(z) ch[z][y==ch[z][1]]=x;`
 
 ```c++
-void rotate(int x) { // 以x的父亲节点为根节点旋转
+void rotate(int x) { // 以x的父亲节点为根节点旋转 x 是父节点左儿子就右旋，否则左旋
     int y = fa[x], z = fa[y], chk = get(x);
 
     //1
@@ -89,7 +89,7 @@ Splay操作即对$x$做一系列splay步骤，每次对$x$做一次splay步骤�
 ![alt text](image-8.png)
 2. zig-zig：在$p$不是根节点且$x$和$p$都是右侧子节点或都是左侧子节点时操作，下方例图显示了$x$和$p$都是左侧子节点时的情况。Splay树首先按照连接$p$与其父节点$g$边旋转，然后按照连接$x$和$p$的边旋转。
 ![alt text](image-9.png)
-即首先将$g$左旋或右旋，然后将$x$右旋或左旋。
+即首先将$gp$左旋或右旋，然后将$x$左旋或右旋。
 ![alt text](image-10.png)
 ![alt text](image-11.png)
 3. zig-zag：在$p$不是根节点且$x$和$p$一个是右侧子节点一个是左侧子节点时操作。Splay树首先按$p$和$x$之间的边旋转，然后按$x$和$g$新生成的结果边旋转。
@@ -98,10 +98,113 @@ Splay操作即对$x$做一系列splay步骤，每次对$x$做一次splay步骤�
 ![alt text](image-13.png)
 ![alt text](image-14.png)
 
+```c++
+void splay(int x) {
+    for (int f = fa[x]; f = fa[x], f; rotate(x)) {
+        if (fa[f]) rotate(get(x) == get(f) ? f : x);
+    }
+    rt = x;
+}
+```
 
+对于$n$个节点的splay树，做一次splay操作的均摊复杂度为$O(logn)$。因此基于splay的插入、查询、删除等操作的时间复杂度也为均摊$O(logn)$。
 
+### 插入操作
 
+过程
 
+插入操作是一个比较复杂的过程，具体步骤如下（假设插入的值为$k$）：
+- 如果树空了，则直接插入根并退出。
+- 如果当前节点的权值等于$k$则增加当前节点的大小并更新节点和父亲的信息，将当前节点进行Splay操作。
+- 否则按照二叉查找树的性质向下找，找到空节点就插入即可（然后Splay操作）。
+
+```c++
+void ins(int k) {
+    if (!rt) { //树为空
+        val[++tot] = k;
+        cnt[tot]++;
+        rt = tot;
+        maintain(rt);
+        return;
+    }
+    int cur = rt, f = 0; //从根节点开始找
+    while (1) {
+        if (val[cur] == k) {
+            cnt[cur]++;
+            maintain(cur);
+            maintain(f);
+            splay(cur);
+            break;
+        }
+        f = cur;
+        cur = ch[cur][val[cur] < k]; // 判断 走左还是右
+        if (!cur) {
+            val[++tot] = k;
+            cnt[tot]++;
+            fa[tot] = f;
+            ch[f][val[f] < k] = tot;
+            maintain(tot);
+            maintain(f);
+            splay(tot);
+            break;
+        }
+    }
+}
+```
+
+### 查询x的排名
+
+过程
+
+根据二叉查找树的定义和性质，显然可以按照以下步骤查询$x$的排名：
+- 如果$x$比当前节点的权值小，向其左子树查找。
+- 如果$x$比当前节点的权值大，将答案加上左子树($size$)和当前节点($cnt$)的大小，向其右子树查找。
+- 如果$x$与当前节点的权值相同，将答案加$1$并返回。
+注意最后需要进行Splay操作。
+```c++
+int rk(int k) {
+    int res = 0, cur = rt;
+    while (1) {
+        if (k < val[cur]) {
+            cur = ch[cur][0];
+        } else { // k >= val[cur]
+            res += sz[ch[cur][0]];
+            if (k == val[cur]) {
+                splay(cur);
+                return res + 1;
+            }
+            res += cnt[cur];
+            cur = ch[cur][1];
+        }
+    }
+}
+```
+
+### 查询排名x的数
+
+过程
+
+设$k$为剩余排名，具体步骤如下：
+- 如果左子树非空且剩余排名$k$不大于左子树的大小$size$，那么向左子树查找。
+- 否则将$k$减去左子树和根的大小，如果此时$k$的值小于等于$0$，则返回根节点的权值，否则继续向右子树查找。
+
+```c++
+int kth(int k) {
+    int cur = rt;
+    while (1) {
+        if (ch[cur][0] && k <= sz[ch[cur][0]]) {
+            cur = ch[cur][0];
+        } else {
+            k -= cnt[cur] + sz[ch[cur][0]];
+            if (k <= 0) {
+                splay(cur);
+                return val[cur];
+            }
+            cur = ch[cur][1];
+        }
+    }
+}
+```
 
 
 
