@@ -206,6 +206,22 @@ int kth(int k) {
 }
 ```
 
+### 查询前驱
+
+过程
+
+前驱定义为小于$x$的最大的数，那么查询前驱可以转化为：将$x$插入（此时$x$已经在根的位置了），前驱即为$x$的左子树中最右边的节点，最后将$x$删除即可。
+
+```c++
+int pre() {
+    int cur = ch[rt][0];
+    if (!cur) return cur;
+    while (ch[cur][1]) cur = ch[cur][1];
+    splay(cur);
+    return cur;
+}
+```
+
 ### 查询后继
 
 过程
@@ -213,9 +229,405 @@ int kth(int k) {
 后继定义为大于$x$的最小的数，查询方法和前驱类似：$x$的右子树中最左边的节点。
 
 ```c++
-
+int nxt() {
+    int cur = ch[rt][1];
+    if (!cur) return cur;
+    while (ch[cur][0]) cur = ch[cur][0];
+    splay(cur);
+    return cur;
+}
 ```
 
+### 合并两棵树
 
+过程
 
+合并两棵Splay树，设两棵树的根节点分别为$x$和$y$，那么我们要求$x$树中的最大值小于$y$树中的最小值，合并操作如下：
+- 如果$x$和$y$其中之一或两者都为空树，直接返回不为空的那一棵树的根节点或空树。
+- 否则将$x$树中的最大值Splay到根，然后把它的右子树设置为$y$并更新节点的信息，然后返回这个节点。
 
+### 删除操作
+
+过程
+
+删除操作也是一个比较复杂的操作，具体步骤如下：
+
+首先将$x$旋转到根的位置。
+- 如果$cnt[x]>1$（有不止一个$x$），那么将$cnt[x]$减去$1$并退出。
+- 否则，合并它的左右两棵子树即可。
+
+```c++
+void del(int k) {
+    rk(k); // 此处作用是将值=k的节点旋转到根位置
+    if (cnt[rt] > 1) {
+        cnt[rt]--;
+        maintain(rt);
+        return;
+    }
+    if (!ch[rt][0] && !ch[rt][1]) { // 左右子树都为空
+        clear(rt);
+        rt = 0;
+        return;
+    }
+    if (!ch[rt][0]) { // 左子树为空
+        int cur = rt;
+        rt = ch[rt][1];
+        fa[rt] = 0;
+        clear(cur);
+        return;
+    }
+    int cur = rt, x = pre();
+    fa[ch[cur][1]] = x;
+    ch[x][1] = ch[cur][1];
+    clear(cur);
+    maintain(rt);
+}
+```
+## 实现
+
+```c
+#include<cstdio>
+const int N = 100005;
+int rt, tot, fa[N], ch[N][2], val[N], cnt[N], sz[N];
+
+struct Splay {
+    void maintain(int x) {sz[x] = sz[ch[x][0]] + sz[ch[x][1]] + cnt[x];}
+
+    bool get(int x) {return x == ch[fa[x]][1];}
+
+    void clear(int x) {
+        ch[x][0] = ch[x][1] = fa[x] = val[x] = sz[x] = cnt[x] = 0;
+    }
+
+    void rotate(int x) {
+        int y = fa[x], z = fa[y], chk = get(x);
+        ch[y][chk] = ch[x][chk ^ 1];
+        if (ch[x][chk ^ 1]) fa[ch[x][chk ^ 1]] = y;
+        ch[x][chk ^ 1] = y;
+        fa[y] = x;
+        fa[x] = z;
+        if (z) ch[z][y == ch[z][1]] = x;
+        maintain(y);
+        maintain(x);
+    }
+
+    void splay(int x) {
+        for (int f = fa[x]; f = fa[x], f; rotate(x)) {
+            if (fa[f]) rotate(get(x) == get(f) ? f : x);
+        }
+    }
+
+    void ins(int k) {
+        if (!rt) {
+            val[++tot] = k;
+            cnt[tot]++;
+            rt = tot;
+            maintain(rt);
+            return;
+        }
+        int cur = rt, f = 0;
+        while(1) {
+            if (val[cur] == k) {
+                cnt[cur]++;
+                maintain(cur);
+                maintain(f);
+                splay(cur);
+                break;
+            }
+            f = cur;
+            cur = ch[cur][val[cur] < k];
+            if (!cur) {
+                val[++tot] = k;
+                cnt[tot]++;
+                fa[tot] = f;
+                ch[f][val[f] < k] = tot;
+                maintain(tot);
+                maintain(f);
+                splay(tot);
+                break;
+            }
+        }
+    }
+
+    int rk(int k) {
+        int res = 0, cur = rt;
+        while(1) {
+            if (k < val[cur]) {
+                cur = ch[cur][0];
+            } else {
+                res += sz[ch[cur][0]];
+                if (k == val[cur]) {
+                    splay(cur);
+                    return res + 1;
+                }
+                res += cnt[cur];
+                cur = ch[cur][1];
+            }
+        }
+    }
+
+    int kth(int k) {
+        int cur = rt;
+        while(1) {
+            if (ch[cur][0] && k <= sz[ch[cur][0]]) {
+                cur = ch[cur][0];
+            } else {
+                k -= cnt[cur] + sz[ch[cur][0]];
+                if (k <= 0) {
+                    splay(cur);
+                    return val[cur];
+                }
+                cur = ch[cur][1];
+            }
+        }
+    }
+
+    int pre() {
+        int cur = ch[rt][0];
+        if (!cur) return cur;
+        while(ch[cur][1]) cur = ch[cur][1];
+        splay(cur);
+        return cur;
+    }
+
+    int nxt() {
+        int cur = ch[rt][1];
+        if (!cur) return cur;
+        while(ch[cur][0]) cur = ch[cur][0];
+        splay(cur);
+        return cur;
+    }
+
+    void del(int k) {
+        rk(k);
+        if (cnt[rt] > 1) {
+            cnt[rt]--;
+            maintain(rt);
+            return;
+        }
+        if (!ch[rt][0] && !ch[rt][1]) {
+            clear(rt);
+            rt = 0;
+            return;
+        }
+        if (!ch[rt][0]) {
+            int cur = rt;
+            rt = ch[rt][1];
+            fa[rt] = 0;
+            clear(cur);
+            return;
+        }
+        int cur = rt;
+        int x = pre();
+        fa[ch[cur][1]] = x;
+        ch[x][1] = ch[cur][1];
+        clear(cur);
+        maintain(rt);
+    }
+} tree;
+
+int main() {
+    int n, opt, x;
+    for (scanf("%d", &n); n; --n) {
+        scanf("%d%d", &opt, &x);
+        if (opt == 1)
+        tree.ins(x);
+        else if (opt == 2)
+        tree.del(x);
+        else if (opt == 3)
+        printf("%d\n", tree.rk(x));
+        else if (opt == 4)
+        printf("%d\n", tree.kth(x));
+        else if (opt == 5)
+        tree.ins(x), printf("%d\n", val[tree.pre()]), tree.del(x);
+        else
+        tree.ins(x), printf("%d\n", val[tree.nxt()]), tree.del(x);
+  }
+  return 0;
+}
+```
+
+## 序列操作
+
+Splay也可以运用在序列上，用于维护区间信息，与线段树相比，Splay常数较大，但是支持更复杂的序列操作，如区间翻转等。
+
+将序列建成Splay有如下性质：
+- Splay的中序遍历相当于原序列从左到右遍历。
+- Splay上的一个节点代表原序列的一个元素；Splay上的一棵子树，代表原序列一段区间。
+
+因为有Splay操作，可以快速提取出代表某个区间的Splay子树。
+
+在操作之前，你需要先把这棵Splay建出来，根据Splay的特性，直接建出一棵只有右儿子的链即可，时间复杂度仍然是正确的。
+
+## 一些进阶操作
+
+Splay的一棵子树代表原序列的一段区间，现在想找到序列区间`[L,R]`代表的子树，只需要将代表$a_{L-1}$的节点Splay到根，再将代表$a_{R+1}$的节点Splay到根的右儿子即可。根据【Splay的中序遍历相当于原序列从左到右的遍历】，对应$a_{R+1}$的节点的左子树中序遍历为序列$a[L,R]$，故其为区间$[L,R]$代表的子树。
+
+一般会建立左右两个哨兵节点$0$和$n+1$，放在数列的最开头和最结尾，防止$L-1$或$R+1$超出数列范围。
+
+所以要将Splay函数进行一些修改，能够实现将节点旋转到目标点的儿子，如果目标点$goal$为$0$说明旋转到根节点。
+
+```c++
+void splay(int x, int goal = 0) {
+    if (goal == 0) rt = x;
+    while(fa[x] != goal) {
+        int f = fa[x], g = fa[fa[x]];
+        if (g != goal) {
+            if (get(f) == get(x)) {
+                rotate(x);
+            } else {
+                rotate(f);
+            }
+        }
+        rotate(x);
+    }
+}
+```
+
+### 区间翻转
+
+Splay常见的应用之一。
+
+过程
+
+先将询问区间的子树提取出来，因为是区间翻转，我们需要将这棵子树的中序遍历顺序翻转。
+
+一个暴力做法是每次将根节点的左右儿子交换，然后递归左右子树做同样的操作，这样复杂度为$O(n)$，不可承受，可以考虑使用懒标记，先给根打上【翻转标记】并交换其左右儿子。当递归到一个带懒标记的点时，将懒标记下传即可。
+
+```c++
+void tagrev(int x) {
+    swap(ch[x][0], ch[x][1]);
+    lazy[x] ^= 1;
+}
+
+void pushdown(int x) {
+    if (lazy[x]) {
+        tagrev(ch[x][0]);
+        tagrev(ch[x][1]);
+        lazy[x] = 0;
+    }
+}
+
+void reverse(int l, int r) {
+    int L = kth(l - 1), R = kth(r + 1);
+    splay(L), splay(R, L);
+    int tmp = ch[ch[L][1]][0];
+    tagrev(tmp);
+}
+```
+
+### 实现
+
+注意kth要下传翻转标记
+
+```c++
+#include <algorithm>
+#include <cstdio>
+const int N = 100005;
+
+int n, m, l, r, a[N];
+
+int rt, tot, fa[N], ch[N][2], val[N], sz[N], lazy[N];
+
+struct Splay {
+  void maintain(int x) { sz[x] = sz[ch[x][0]] + sz[ch[x][1]] + 1; }
+
+  bool get(int x) { return x == ch[fa[x]][1]; }
+
+  void clear(int x) {
+    ch[x][0] = ch[x][1] = fa[x] = val[x] = sz[x] = lazy[x] = 0;
+  }
+
+  void rotate(int x) {
+    int y = fa[x], z = fa[y], chk = get(x);
+    ch[y][chk] = ch[x][chk ^ 1];
+    if (ch[x][chk ^ 1]) fa[ch[x][chk ^ 1]] = y;
+    ch[x][chk ^ 1] = y;
+    fa[y] = x;
+    fa[x] = z;
+    if (z) ch[z][y == ch[z][1]] = x;
+    maintain(y);
+    maintain(x);
+  }
+
+  void splay(int x, int goal = 0) {
+    if (goal == 0) rt = x;
+    while (fa[x] != goal) {
+      int f = fa[x], g = fa[fa[x]];
+      if (g != goal) {
+        if (get(f) == get(x))
+          rotate(x);
+        else
+          rotate(f);
+      }
+      rotate(x);
+    }
+  }
+
+  void tagrev(int x) {
+    std::swap(ch[x][0], ch[x][1]);
+    lazy[x] ^= 1;
+  }
+
+  void pushdown(int x) {
+    if (lazy[x]) {
+      tagrev(ch[x][0]);
+      tagrev(ch[x][1]);
+      lazy[x] = 0;
+    }
+  }
+
+  int build(int l, int r, int f) {
+    if (l > r) return 0;
+    int mid = (l + r) / 2, cur = ++tot;
+    val[cur] = a[mid], fa[cur] = f;
+    ch[cur][0] = build(l, mid - 1, cur);
+    ch[cur][1] = build(mid + 1, r, cur);
+    maintain(cur);
+    return cur;
+  }
+
+  int kth(int k) {
+    int cur = rt;
+    while (1) {
+      pushdown(cur);
+      if (ch[cur][0] && k <= sz[ch[cur][0]]) {
+        cur = ch[cur][0];
+      } else {
+        k -= 1 + sz[ch[cur][0]];
+        if (k <= 0) {
+          splay(cur);
+          return cur;
+        }
+        cur = ch[cur][1];
+      }
+    }
+  }
+
+  void reverse(int l, int r) {
+    int L = kth(l), R = kth(r + 2);
+    splay(L), splay(R, L);
+    int tmp = ch[ch[L][1]][0];
+    tagrev(tmp);
+  }
+
+  void print(int x) {
+    pushdown(x);
+    if (ch[x][0]) print(ch[x][0]);
+    if (val[x] >= 1 && val[x] <= n) printf("%d ", val[x]);
+    if (ch[x][1]) print(ch[x][1]);
+  }
+} tree;
+
+int main() {
+  scanf("%d%d", &n, &m);
+  for (int i = 0; i <= n + 1; i++) a[i] = i;
+  rt = tree.build(0, n + 1, 0);
+  while (m--) {
+    scanf("%d%d", &l, &r);
+    tree.reverse(l, r);
+  }
+  tree.print(rt);
+  return 0;
+}
+```
