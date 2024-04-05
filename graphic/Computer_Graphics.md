@@ -28,15 +28,19 @@ x_ax_b+y_ay_b$$
 
 常常用于已知两个向量，去找到其夹角。
 也可以找到一个向量到另一个向量的投影。
+
 ![alt text](image-3.png)
+
 - $\overrightarrow b_{\bot}$:$\overrightarrow b$在$\overrightarrow a$的投影。
     - $\overrightarrow b_{\bot}=k\widehat a$
     - $k=\Vert\overrightarrow b_{\bot}\Vert=\Vert\overrightarrow b\Vert\cos\theta$
 
 这样也可以将一个向量分解成两个向量（垂直于平行的分解），例如：
+
 ![alt text](image-4.png)
 
 可以比较两个向量的方向是否接近，例如下图中$\overrightarrow a$和$\overrightarrow b$方向基本相近，而$\overrightarrow a$与$\overrightarrow c$方向基本相反
+
 ![alt text](image-5.png)
 
 ### Cross product(叉乘)
