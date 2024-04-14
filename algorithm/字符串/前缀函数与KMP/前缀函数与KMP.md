@@ -284,17 +284,6 @@ $$
 
 该问题同样可通过构造前缀函数的自动机解决。同之前一样，我们利用先前计算过的结果对每个模式计算其转移然后相应统计答案即可。
 
-
-
-
-
-
-
-
-
-
-
-
 ## 例题
 
 [Anthem of Berland](https://codeforces.com/contest/808/problem/G)
