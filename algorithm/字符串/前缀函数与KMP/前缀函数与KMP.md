@@ -261,3 +261,19 @@ $$
 我们该如何计算这些值呢？首先根据定义，
 
 
+
+
+
+
+
+
+
+
+
+
+
+## 例题
+
+[Anthem of Berland](https://codeforces.com/contest/808/problem/G)
+
+[MUH and Cub Walls](https://codeforces.com/problemset/problem/471/D)
