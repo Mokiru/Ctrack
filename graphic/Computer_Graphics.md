@@ -74,20 +74,6 @@ z_b\\
 如上图左，要想判断$\overrightarrow b$在$\overrightarrow a$的左侧还是右侧，则可以根据$\overrightarrow a\times\overrightarrow b$得到，如果在左侧，那么得到的就是$\overrightarrow z$方向的向量，否则是$-\overrightarrow z$方向的向量，自然可以根据这个，判断一个点是否在三角形内部。例如上图右，已知$A,B,C$三点，判断$P$是否在三角形$ABC$中，则只需要判断$\overrightarrow {AB}\times\overrightarrow {AP}$,$\overrightarrow {BC}\times\overrightarrow {BP}$,$\overrightarrow {CA}\times\overrightarrow {CP}$是否得到的P所相对于其边方向都在同一侧即可，例如上图，$\overrightarrow {AP},\overrightarrow {BP},\overrightarrow {CP}$分别在$\overrightarrow {AB},\overrightarrow {BC},\overrightarrow {CA}$的左侧，那么可以知道点$P$在三角形$ABC$中。
 
 
-
-## Rasterization（光栅化）
-
-将三维空间的几何形体显示在屏幕上就是光栅化。
-
-- 将几何图元（3D三角形/多边形）投影到屏幕上
-- 将投影图元分解为片段（像素）
-- 视频游戏中的黄金标准（实时应用程序）
-
-![alt text](image.png)
-
-![alt text](image-1.png)
-
-
 ## Transformation
 
 ### Linear Transforms
@@ -313,6 +299,17 @@ $$
 
 
 
+## Rasterization（光栅化）
+
+将三维空间的几何形体显示在屏幕上就是光栅化。
+
+- 将几何图元（3D三角形/多边形）投影到屏幕上
+- 将投影图元分解为片段（像素）
+- 视频游戏中的黄金标准（实时应用程序）
+
+![alt text](image.png)
+
+![alt text](image-1.png)
 
 
 
