@@ -232,7 +232,7 @@ x\\y\\1
 \end{bmatrix}
 $$
 
-对于齐次坐标系，两个点相加，第三维的值就大于$1$了，如点$(x,y,w)(w!=0)$，其真正表示的点是$(x/w,y/w,1)$，而向量与向量加减运算仍然是向量，按照定义，点与向量相加是点。点与点相减则变成向量。
+对于齐次坐标系（Homogenoeus coordinates），两个点相加，第三维的值就大于$1$了，如点$(x,y,w)(w!=0)$，其真正表示的点是$(x/w,y/w,1)$，而向量与向量加减运算仍然是向量，按照定义，点与向量相加是点。点与点相减则变成向量。
 
 那么上述线性变换的矩阵则可以改为：
 
@@ -295,6 +295,182 @@ $$
 ![alt text](image-17.png)
 
 如上图的变换，并不是进行直接的Rotate Matrix变换，而是将一个旋转变换分解成多个变换，先是进行$T(-c)$变换将图形移动到原点进行下一步$Rotate$操作，最后$T(c)$将图形变换回去。
+
+## Transformation Cont
+
+### 3D transformations
+
+使用齐次坐标来表示：
+
+$$
+3D\ \ point = (x,y,z,1)^{T}\\
+3D\ \ vector = (x,y,z,0)^{T}\\
+$$
+
+通常，有一个点如$(x,y,z,w)^{T}(w\neq 0)$我们就认为这个点实际上等价于：
+$$
+(x/w,y/w,z/w,1)^{T}
+$$
+
+同理根据上面2D中的各种变换矩阵，我们可以得到3D中的仿射变换矩阵（平移变换在线性变换之后）：
+
+$$
+\begin{pmatrix}
+x'\\y'\\z'\\1
+\end{pmatrix}
+=
+\begin{pmatrix}
+a&b&c&t_x\\
+d&e&f&t_y\\
+g&h&i&t_z\\
+0&0&0&1\\
+\end{pmatrix}
+\cdot
+\begin{pmatrix}
+x\\y\\z\\1
+\end{pmatrix}
+$$
+
+当我们想在三维空间中进行旋转，我们先将其拆分成三种旋转：绕$x$轴，$y$轴，$z$轴旋转。这样旋转就类似于二维空间的旋转，因为绕$x$轴其$x$坐标不会发生变化：
+$$
+R_x(\alpha)
+=
+\begin{pmatrix}
+1&0&0&0\\
+0&\cos\alpha&-\sin\alpha&0\\
+0&\sin\alpha&\cos\alpha&0\\
+0&0&0&1\\
+\end{pmatrix}
+$$
+
+$$
+R_y(\alpha)
+=
+\begin{pmatrix}
+\cos\alpha&0&\sin\alpha&0\\
+0&1&0&0\\
+-\sin\alpha&0&\cos\alpha&0\\
+0&0&0&1\\
+\end{pmatrix}
+$$
+$$
+R_z(\alpha)
+=
+\begin{pmatrix}
+\cos\alpha&-\sin\alpha&0&0\\
+\sin\alpha&\cos\alpha&0&0\\
+0&0&1&0\\
+0&0&0&1\\
+\end{pmatrix}
+$$
+
+因此在普遍的旋转中，可以将旋转分解为$R_x,R_y,R_z$：
+$$
+R_{xyz}(\alpha,\beta,\gamma)=R_x(\alpha)R_y(\beta)R_y(\gamma)
+$$
+
+Rodrigues's Rotation Formula，绕轴$n$旋转$\alpha$：
+
+$$
+R(\mathbf{n},\alpha)=\cos(\alpha)\mathbf{I}+(1-\cos(\alpha))\mathbf{nn}^{T}+\sin(\alpha)
+\underbrace{
+\begin{pmatrix}
+0&-n_z&n_y\\
+n_z&0&-n_x\\
+-n_y&n_x&0\\
+\end{pmatrix}    
+}_{\mathbf{N}}
+$$
+
+
+### Viewing transformation
+
+model transformation->view transformation->projection transformation
+
+#### View / Camera transformation(视图变换)
+
+视图变换就像摆放相机，那么我们首先需要定义相机的位置，然后定义相机“看”的方向（类似于人拿着相机朝向），还有相机本身的朝向方向（相机镜头的朝向）。
+
+因此我们可以定义这个相机：
+- 位置：$\overrightarrow{e}$
+- Look-at：$\widehat{g}$
+- Up direction：$\widehat{t}$
+
+考虑当相机和被拍摄物体一起移动（没有相对运动），可以知道最终结果照片不会有区别。因此我们可以将相机一直放在原点Up direction->$y$，Look-at->$-z$。
+
+![alt text](image-18.png)
+
+那么接下来考虑如何将相机移动到原点处（使用矩阵$M_{view}$变换）：
+
+![alt text](image-19.png)
+
+![alt text](image-20.png)
+
+- 将相机位置移动到原点。
+- 将$g$旋转到$-Z$。
+- 将$t$旋转到$Y$。
+- 将$g\times t$旋转到$x$。
+
+那么根据上面的操作，我们可以知道其变换是先进行平移变换，然后进行旋转变换。
+$$
+M_{view} = R_{view}T_{view}
+$$
+
+显然可以知道矩阵$T_{view}$:
+$$
+T_{view}=
+\begin{pmatrix}
+1&0&0&-x_e\\
+0&1&0&-y_e\\
+0&0&1&-z_e\\
+0&0&0&1\\
+\end{pmatrix}
+$$
+
+对于旋转操作，将$g$旋转到$-Z$等操作是很难直接得到的，而将$-Z$旋转到$g$的旋转矩阵很容易得到，因此我们可以求出逆变换，然后得到这个矩阵的逆矩阵，接着就得到变换矩阵了：
+$$
+R^{-1}_{view}=
+\begin{bmatrix}
+x_{\widehat{g}\times\widehat{t}}&x_t&x_{-g}&0\\
+y_{\widehat{g}\times\widehat{t}}&y_t&y_{-g}&0\\
+z_{\widehat{g}\times\widehat{t}}&z_t&z_{-g}&0\\
+0&0&0&1\\
+\end{bmatrix}
+\Rightarrow
+\begin{bmatrix}
+x_{\widehat{g}\times\widehat{t}}&y_{\widehat{g}\times\widehat{t}} &z_{\widehat{g}\times\widehat{t}}&0\\
+x_t&y_t&z_t&0\\
+x_{-g}&y_{-g}&z_{-g}&0\\
+0&0&0&1\\
+\end{bmatrix}
+$$
+
+#### Projection transformation(投影变换)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
