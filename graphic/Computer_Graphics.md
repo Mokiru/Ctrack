@@ -447,6 +447,10 @@ $$
 
 #### Projection transformation(投影变换)
 
+- Orthographic projection(正交投影)
+- Perspective projection(透视投影)
+
+![alt text](image-21.png)
 
 
 
