@@ -137,7 +137,7 @@ void BTreeNode::insertNonFull(int k) {
         keys[i + 1] = k;
         n = n + 1;
     } else {
-        // 找到第一个大于关键字 k 的关键字 keys[i] 的孩子节点
+        // 从后往前找到第一个小于等于关键字 k 的关键字 keys[i] 的孩子节点 自然可以二分查找
         while (i >= 0 && kesy[i] > k) i--;
 
         // 检查孩子节点是否已满
