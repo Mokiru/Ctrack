@@ -99,7 +99,95 @@ void BTree::insert(int k) {
 
             //将旧的根节点作为新的根节点的孩子
             s->C[0] = root;
+        
+            //将旧的根节点分裂为两个，并将一个关键字上移到新的根节点
+            s->splitChild(0, root);
+
+            //新的根节点有两个孩子节点
+            //确定哪一个孩子将拥有新插入的关键字
+            int i = 0;
+            if (s->keys[0] < k) i++;
+            s->C[i]-?insertNonFull(k);
+
+            //新的根节点更新为s
+            root = s;
+        } else {
+            //根节点未满，调用insertNonFull() 函数进行插入
+            root->insertNonFull(k);
         }
     }
+}
+
+//将关键字 k 插入到一个未满的节点中
+void BTreeNode::insertNonFull(int k) {
+    //初始化 i 为节点中的最后一个关键字的位置
+    int i = n - 1;
+
+    //如果当前节点是叶子节点
+    if (leaf == true) {
+        //下面的循环做两件事
+        // 1 找到新插入的关键字位置并插入
+        // 2 移动所有大于关键字 k 的向后移动一个位置
+        while (i >= 0 && keys[i] > k) {
+            keys[i + 1] = keys[i];
+            i--;
+        }
+        //插入新的关键字，节点包含的关键字个数加一
+        keys[i + 1] = k;
+        n = n + 1;
+    } else {
+        // 找到第一个大于关键字 k 的关键字 keys[i] 的孩子节点
+        while (i >= 0 && kesy[i] > k) i--;
+
+        // 检查孩子节点是否已满
+        if (C[i + 1]->n == 2 * t - 1) {
+            //如果已满，则进行分裂操作
+            splitChild(i + 1, C[i + 1]);
+
+            //分裂后，C[i]中间的关键字上移到父节点
+            // C[i] 分裂称为两个孩子节点
+            // 找到新插入关键字应该插入的节点位置
+            if (keys[i + 1] < k) i++;
+        } 
+        C[i + 1]->insertNonFull(k);
+    }
+}
+
+// 节点 y 已满，则分裂节点 y
+void BTreeNode::splitChild(int i, BTreeNode *y) {
+  // 创建一个新的节点存储 t - 1 个关键字
+  BTreeNode *z = new BTreeNode(y->t, y->leaf);
+  z->n = t - 1;
+
+  // 将节点 y 的后 t -1 个关键字拷贝到 z 中
+  for (int j = 0; j < t - 1; j++) z->keys[j] = y->keys[j + t];
+
+  // 如果 y 不是叶子节点，拷贝 y 的后 t 个孩子节点到 z中
+  if (y->leaf == false) {
+    for (int j = 0; j < t; j++) z->C[j] = y->C[j + t];
+  }
+
+  // 将 y 所包含的关键字的个数设置为 t -1
+  // 因为已满则为2t -1 ，节点 z 中包含 t - 1 个
+  // 一个关键字需要上移
+  // 所以 y 中包含的关键字变为 2t-1 - (t-1) -1
+  y->n = t - 1;
+
+  // 给当前节点的指针分配新的空间，
+  // 因为有新的关键字加入，父节点将多一个孩子。
+  for (int j = n; j >= i + 1; j--) C[j + 1] = C[j];
+
+  // 当前节点的下一个孩子设置为z
+  C[i + 1] = z;
+
+  // 将所有父节点中比上移的关键字大的关键字后移
+  // 找到上移节点的关键字的位置
+  for (int j = n - 1; j >= i; j--) keys[j + 1] = keys[j];
+
+  // 拷贝 y 的中间关键字到其父节点中
+  keys[i] = y->keys[t - 1];
+
+  // 当前节点包含的关键字个数加 1
+  n = n + 1;
 }
 ```
