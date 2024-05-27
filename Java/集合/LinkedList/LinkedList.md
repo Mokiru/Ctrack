@@ -381,3 +381,29 @@ public E previous() {
 }
 
 ```
+
+迭代器对应的移除元素的方法如下，删除上一次返回的元素：
+
+```java
+// 从列表中删除上次被返回的元素
+public void remove() {
+    // 检查是否在迭代过程中链表被修改
+    checkForComodification();
+    // 如果上次返回的节点为空，则抛出异常
+    if (lastReturned == null)
+        throw new IllegalStateException();
+
+    // 获取当前节点的下一个节点
+    Node<E> lastNext = lastReturned.next;
+    // 从链表中删除上次返回的节点
+    unlink(lastReturned);
+    // 修改指针
+    if (next == lastReturned)
+        next = lastNext;
+    else
+        nextIndex--;
+    // 将上次返回的节点引用置为 null，方便 GC 回收
+    lastReturned = null;
+    expectedModCount++;
+}
+```
