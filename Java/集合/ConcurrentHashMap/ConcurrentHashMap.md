@@ -389,7 +389,8 @@ public V get(Object key) {
  * Initializes table, using the size recorded in sizeCtl.
  */
 private final Node<K,V>[] initTable() {
-    Node<K,V>[] tab; int sc;
+    Node<K,V>[] tab; 
+    int sc;
     while ((tab = table) == null || tab.length == 0) {
         //　如果 sizeCtl < 0 ,说明另外的线程执行CAS 成功，正在进行初始化。
         if ((sc = sizeCtl) < 0)
@@ -413,3 +414,136 @@ private final Node<K,V>[] initTable() {
     return tab;
 }
 ```
+
+`ConcurrentHashMap` 的初始化是通过自旋和$CAS$操作完成的。里面需要注意的是变量 `sizeCtl`，它的值决定着当前的初始化状态。
+1. `-1` 说明正在初始化，其它线程需要自旋等待。
+2. `-N` 说明 $table$ 正在扩容， 高 $16$ 位表示扩容的标识戳，低 $16$ 位减 $1$ 为正在进行扩容的线程数。
+3. `0` 表示 $table$ 初始化大小，如果 $table$ 没有初始化。
+4. `>0` 表示 $table$ 扩容的阈值，如果 $table$ 已经初始化。
+
+## put
+
+```java
+public V put(K key, V value) {
+    return putVal(key, value, false);
+}
+
+/** Implementation for put and putIfAbsent */
+final V putVal(K key, V value, boolean onlyIfAbsent) {
+    // key 和 value 不能为空
+    if (key == null || value == null) throw new NullPointerException();
+    int hash = spread(key.hashCode());
+    int binCount = 0;
+    for (Node<K,V>[] tab = table;;) {
+        // f = 目标位置元素
+        Node<K,V> f; int n, i, fh;// fh 后面存放目标位置的元素 hash 值
+        if (tab == null || (n = tab.length) == 0)
+            // 数组桶为空，初始化数组桶（自旋+CAS)
+            tab = initTable();
+        else if ((f = tabAt(tab, i = (n - 1) & hash)) == null) {
+            // 桶内为空，CAS 放入，不加锁，成功了就直接 break 跳出
+            if (casTabAt(tab, i, null,new Node<K,V>(hash, key, value, null)))
+                break;  // no lock when adding to empty bin
+        }
+        else if ((fh = f.hash) == MOVED)
+            tab = helpTransfer(tab, f);
+        else {
+            V oldVal = null;
+            // 使用 synchronized 加锁加入节点
+            synchronized (f) {
+                if (tabAt(tab, i) == f) {
+                    // 说明是链表
+                    if (fh >= 0) {
+                        binCount = 1;
+                        // 循环加入新的或者覆盖节点
+                        for (Node<K,V> e = f;; ++binCount) {
+                            K ek;
+                            if (e.hash == hash &&
+                                ((ek = e.key) == key ||
+                                 (ek != null && key.equals(ek)))) {
+                                oldVal = e.val;
+                                if (!onlyIfAbsent)
+                                    e.val = value;
+                                break;
+                            }
+                            Node<K,V> pred = e;
+                            if ((e = e.next) == null) {
+                                pred.next = new Node<K,V>(hash, key,
+                                                          value, null);
+                                break;
+                            }
+                        }
+                    }
+                    else if (f instanceof TreeBin) {
+                        // 红黑树
+                        Node<K,V> p;
+                        binCount = 2;
+                        if ((p = ((TreeBin<K,V>)f).putTreeVal(hash, key,
+                                                       value)) != null) {
+                            oldVal = p.val;
+                            if (!onlyIfAbsent)
+                                p.val = value;
+                        }
+                    }
+                }
+            }
+            if (binCount != 0) {
+                if (binCount >= TREEIFY_THRESHOLD)
+                    treeifyBin(tab, i);
+                if (oldVal != null)
+                    return oldVal;
+                break;
+            }
+        }
+    }
+    addCount(1L, binCount);
+    return null;
+}
+```
+1. 根据 $key$ 计算出 $hashcode$
+2. 判断是否需要进行初始化
+3. 即为当前 $key$ 定位出的 $Node$，如果为空表示当前位置可以写入数据，利用 $CAS$ 尝试写入，失败则自旋保证成功
+4. 如果当前位置的 `hashcode==MOVED==-1` ，则需要进行扩容。
+5. 如果都不满足，则利用 `synchronized` 锁写入数据。
+6. 如果数据大于 `TREEIFY_THRESHOLD` 则要执行树化方法，在 `treeifyBin` 中会首先判断当前数组长度大于等于 $64$ 时才会将链表转为红黑树。
+
+## get
+
+```java
+public V get(Object key) {
+    Node<K,V>[] tab; Node<K,V> e, p; int n, eh; K ek;
+    // key 所在的 hash 位置
+    int h = spread(key.hashCode());
+    if ((tab = table) != null && (n = tab.length) > 0 &&
+        (e = tabAt(tab, (n - 1) & h)) != null) {
+        // 如果指定位置元素存在，头结点hash值相同
+        if ((eh = e.hash) == h) {
+            if ((ek = e.key) == key || (ek != null && key.equals(ek)))
+                // key hash 值相等，key值相同，直接返回元素 value
+                return e.val;
+        }
+        else if (eh < 0)
+            // 头结点hash值小于0，说明正在扩容或者是红黑树，find查找
+            return (p = e.find(h, key)) != null ? p.val : null;
+        while ((e = e.next) != null) {
+            // 是链表，遍历查找
+            if (e.hash == h &&
+                ((ek = e.key) == key || (ek != null && key.equals(ek))))
+                return e.val;
+        }
+    }
+    return null;
+}
+
+```
+
+1. 根据 $hash$ 值计算位置
+2. 查找到指定位置，如果头节点就是要找的，直接返回它的 $value$
+3. 如果头节点 $hash$ 值小于 $0$， 说明正在扩容或者是红黑树。
+4. 如果是链表，遍历查找。
+
+# 总结
+
+$Java7$ 中的 `ConcurrentHashMap` 使用的是分段锁，也就是每一个 $Segment$ 上同时只有一个线程可以操作，每一个 $Segment$ 都是一个类似 `HashMap` 数组的结构，它可以扩容，它的冲突会转化为链表，但是 `Segment` 的个数一旦初始化就不能改变。
+
+$Java8$ 的 `ConcurrentHashMap` 使用的是 `Synchronized` 锁 加 $CAS$ 机制。结构也由 $Java7$ 中的 `Segment` 数组 + `HashEntry` 数组 + 链表进化成了 `Node` 数组 + 链表/红黑树，`Node` 是类似于一个 `HashEntry` 的结构，它的冲突再达到一定大小时会转化为红黑树，在冲突小于一定数量的时又退回链表。
