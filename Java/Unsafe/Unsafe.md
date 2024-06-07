@@ -53,4 +53,39 @@ Exception in thread "main" java.lang.SecurityException: Unsafe
 
 那么为什么要对 `Unsafe` 类进行如此谨慎的使用限制呢？
 
-`Unsafe` 提供的功能过于底层（如直接访问系统内存资源，自主
+`Unsafe` 提供的功能过于底层（如直接访问系统内存资源，自主管理内存资源等），安全隐患也比较大，使用不当的话，很容易出现很严重的问题。
+
+如若想使用 `Unsafe` 这个类的话，应该如何获取其实例呢？
+
+这里介绍两个可行的方案。
+
+1、 利用反射获得 `Unsafe` 类中已经实例化完成的单例对象 `theUnsafe`。
+```java
+private static Unsafe reflectGetUnsafe() {
+  try {
+    Field field = Unsafe.class.getDeclaredField("theUnsafe");
+    field.setAccessible(true);
+    return (Unsafe) field.get(null);
+  } catch(Exception e) {
+    log.error(e.getMessage(), e);
+    return null;
+  }
+}
+```
+
+2、从 `getUnsafe` 方法的使用限制条件出发，通过Java命令行命令 `-Xbootclasspath/a` 把调用 `Unsafe`相关方法的类 A 所在的 jar 包路径追加到默认的bootstrap 路径中，使得 A 被引导类加载器加载，从而通过 `Unsafe.getUnsafe` 方法安全的获取 `Unsafe` 实例。
+
+`java -Xbootclasspath/a: ${path} // 其中path为调用Unsafe 相关放啊的类所在jar包路径`
+
+## 功能
+
+概括的来说 `Unsafe`类实现功能可以被分为下面 $8$ 类：
+
+1. 内存操作
+2. 内存屏障
+3. 对象操作
+4. 数据操作
+5. CAS操作
+6. 线程调度
+7. Class操作
+8. 系统信息
