@@ -143,6 +143,114 @@ public class PrintClassLoaderTree {
 - 双亲委派模型要求除了顶层的启动类加载器外，其余的类加载器都要有自己的父类加载器。
 - `ClassLoader` 实例会在试图亲自查找类或资源之前，将搜索类或资源的任务委托给其父类加载器。
 
+注意：双亲委派模型并不是以中国强制性的约束，只是JDK官方推荐的一种方式，如果我们因为某些特殊需求想要打破双亲委派模型，也是可以的。
+
+其实这个双亲翻译的容易让人无界，我们一般理解的双亲都是父母，这里的双亲更多地表达的是“父母这一辈”的人而已，并不是说真的有一个 `MotherClassLoader` 和一个 `FatherClassLoader`。 
+
+另外，类加载器之间的父子关系一般不是以继承的关系来实现的，而是通常使用组合关系来复用父加载器的代码。
+
+```java
+public abstract class ClassLoader {
+    //组合
+    private final ClassLoader parent;
+    protected ClassLoader(ClassLoader parent) {
+        this(checkCreateClassLoader(), parent);
+    }
+}
+```
+
+在面向对象编程中，有一条非常经典的设计原则：组合优于继承，多用组合少用继承。
+
+## 双亲委派模型执行流程
+
+双亲委派模型的实现代码非常简单，逻辑非常清晰，都集中在`java.lang.ClassLoader` 的 `loadClass()` 中，相关代码如下：
+```java
+protected Class<?> loadClass(String name, boolean resolve) throws ClassNotFoundException {
+    synchronized (getClassLoadingLock(name)) {
+        // 首先 检查该类是否已经加载过
+        Class c = findLoadedClass(name);
+        if (c == null) {
+            // 如果 c 为 null 说明没有被加载过
+            long t0 = System.nanoTime()l
+            try {
+                if (parent != null) {
+                    // 当父类的加载器不为空，则通过父类的LoadClass来加载该类
+                    c = parent.loadClass(name, false);
+                } else {
+                    // 当父类的加载器为空，则调用启动类加载器来加载
+                    c = findBootstrapClassOrNull(name);
+                }
+            } catch (ClassNotFoundException e) {
+                // 非空父类的类加载器无法找到相应的类，抛出异常
+            }
+
+            if (c == null) {
+                // 当父类加载器无法加载时，则调用 findClass 方法加载
+                long t1 = System.nanoTime();
+                c = findClass(name);
+                // 用于统计类加载器相关信息
+
+                PerfCounter.getParentDelegationTime().addTime(t1 - t0);
+                PerfCounter.getFindClassTime().addElapsedTimeFrom(t1);
+                PerfCounter.getFindClasses().increment();
+            }
+        }
+
+        if (resolve) {
+            // 对类进行 link 操作
+            resolveClass(c);
+        }
+        return c;
+    }
+}
+```
+
+每当一个类加载器接收到加载请求时，它会先将请求转发给父类加载器，在父类加载器没有找到所请求的类的情况下，该类加载器才会尝试去加载。
+
+结合上面的源码，简单总结一下双亲委派模型的执行流程：
+- 在类加载的时候，系统会首先判断当前类是否被加载过，已经被加载打的类会直接返回，否则才会尝试加载（每个父类加载器都会走一遍这个流程）。
+- 类加载器在进行类加载的时候，它首先不会自己去尝试加载这个类，而是把这个请求委派给父类加载器去完成（调用父加载器 `loadClass()` 方法来加载类）。这样的话，所有的请求最终都会传送到顶层的启动类加载器 `BootstrapClassLoader` 中。
+- 只有当父加载器反馈自己无法完成这个加载请求（它的搜索范围中没有找到所需的类）时，子加载器才会尝试自己去加载（调用自己的 `findClass()`方法来加载类）。
+- 如果子类加载器也无法加载这个类，那么它会抛出一个 `ClassNotFoundException` 异常。
+
+JVM判断两个Java类是否相同的具体规则：JVM不仅要看类的全名是否相同，还要看加载此类的类加载器是否一样，只有两者都相同的情况下，才认为两个类是相同的，即使两个类来源于同一个`class` 文件，被同一个虚拟机加载，只要加载它们的类加载器不同，那这两个类就必定不相同。
+
+## 双亲委派模型优点
+
+双亲委派模型保证了 Java 程序的稳定运行，可以避免类的重复加载（JVM 区分不同类的方式不仅仅根据类名，相同的类文件被不同的类加载器加载产生的是两个不同的类），也保证了Java的核心API不被篡改。
+
+如果没有使用双亲委派模型，而是每个类加载器加载自己的话就会出现一些问题，比如我们编写一个称为 `java.lang.Object` 类的话，那么程序运行时，系统就会出现两个不同的 `Object` 类。双亲委派模型可以保证加载的是JRE里的那个 `Object` 类，而不是你写的 `Object` 类，这是因为 `AppClassLoader` 在加载你的`Object` 类时，会委托给 `ExtClassLoader` 去加载，而 `ExtClassLoader` 又会委托给 `BootstrapClassLoader`，`BootstrapClassLoader` 发现自己已经加载过 `Object` 类，会直接返回，而不会去加载你的 `Object` 类。
+
+## 打破双亲委派模型
+
+自定义类加载器，需要继承 `ClassLoader`，如果我们不想打破双亲委派模型，就重写 `ClassLoader` 类中的 `findClass()` 方法即可，无法被父类加载器加载的类最终会通过这个方法被加载，但是，如果想打破双亲委派模型则需要重写 `loadClass()` 方法。
+
+为什么重写`loadClass()` 方法就打破双亲委派模型呢？双亲委派模型的执行流程已经解释了：类加载器在进行类加载的时候，它首先不会自己去尝试加载这个类，而是把这个请求委派给父类加载器去完成（调用父加载器 loadClass()方法来加载类）。
+
+重写 `loadClass()` 方法之后，我们就可以改变传统双亲委派模型的执行流程，例如，子类加载器可以在委派给父类加载器之前，先自己尝试加载这个类，或者在父类加载器返回之后，再尝试从其他地方加载这个类，具体的规则由我们自己实现，根据项目需求定制化。
+
+我们比较熟悉的Tomcat服务器为了能够优先加载Web应用目录下的类，然后再加载其他目录下的类，就自定义了类加载器`WebAppClassLoader` 来打破双亲委派机制，这也是Tomcat下Web应用之间的类实现隔离的具体原理。
+
+![alt text](image-1.png)
+
+Tomcat这四个自定义的类加载器对应的目录如下：
+- `CommonClassLoader` 对应 `<Tomcat>/common/*`
+- `CatalinaClassLoader` 对应 `<Tomcat>/server/*`
+- `SharedClassLoader` 对应 `<Tomcat>/shared/*`
+- `WebAppClassLoader` 对应 `<Tomcat>/webapps/<app>/WEB-INF/*`
+
+从图中的委派关系可以看出：
+- `CommonClassLoader`作为 `CatalinaClassLoader` 和 `SharedClassLoader` 的父加载器。`CommonClassLoader` 能加载的类都可以被 `CatalinaClassLoader` 和 `SharedClassLoader` 使用。因此，`CommonClassLoader` 是为了实现公共类库（可以被所有 Web 应用和 Tomcat 内部组件使用的类库）的共享和隔离。
+- `CatalinaClassLoader` 和 `SharedClassLoader` 能加载的类则与对方相互隔离。`CatalinaClassLoader` 用于加载 Tomcat 自身的类，为了隔离 Tomcat 本身的类和 Web 应用的类。`SharedClassLoader` 作为 `WebAppClassLoader` 的父加载器，专门来加载 Web 应用之间共享的类比如 Spring、Mybatis。
+- 每个 Web 应用都会创建一个单独的 `WebAppClassLoader`，并在启动 Web 应用的线程里设置线程线程上下文类加载器为 `WebAppClassLoader`。各个 `WebAppClassLoader` 实例之间相互隔离，进而实现 Web 应用之间的类隔。
+
+单纯依靠自定义类加载器没办法满足某些场景的要求，例如，有些情况下，高层的类加载器需要加载低层的加载器才能加载的类。
+
+
+
+
+
+
 
 
 
