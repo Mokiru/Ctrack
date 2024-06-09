@@ -64,9 +64,84 @@ JVM中内置了三个重要的 `ClassLoader`：
 
 - `rt.jar`：rt代表RunTime，`rt.jar`是Java基础类库，包含Java doc里面看到的所有的类的类文件，也就是说，我们常用内置库`java.xxx.*` 都在里面，比如`java.util.*`、`java.io.*`、`java.nio.*`、`java.lang.*`、`java.sql.*`、`java.math.*`。
 - Java9引入了模块系统，并且略微更改了上述的类加载器。扩展类加载器被改名为平台类加载器（platform class loader）。JavaSE中除了少数几个关键模块，比如说 `java.base` 是由启动类加载器加载之外，其他的模块均由平台类加载器所加载。
+![alt text](image.png)
 
 除了这三种类加载器之外，用户还可以加入自定义的类加载器来进行扩展，以满足自己的特殊需求，就比如说，我们可以对Java类的字节码（`.class`文件）进行加密，加载时再利用自定义的类加载器对其解密。
 
+自定义类加载器可以有同一个父加载器，自定义类加载器的父加载器同样可以是自定义加载器。
+
+除了 `BootstrapClassLoader` 是JVM自身的一部分之外，其他所有的类加载器都是在JVM外部实现的，并且全部继承自`ClassLoader`抽象类，这样做的好处是用户可以自定义类加载器，以便让应用程序自己决定如何去获取所需的类。
+
+每个 `ClassLoader` 可以通过 `getParent()` 获取其父 `ClassLoader`，如果获取到的 `ClassLoader` 为 `null` 的话，那么该类是通过 `BootstrapClassLoader` 加载的。
+
+```java
+public abstract class ClassLoader {
+    private final ClassLoader parent;
+
+    @CallerSensitive
+    public final ClassLoader getParent() {
+        //...
+    }
+}
+```
+
+为什么获取到 `ClassLoader` 为 `null` 就是 `BootstrapClassLoader` 加载的呢？ 这是因为 `BootstrapClassLoader` 由C++实现，由于该C++实现的类加载器在Java中没有与之对应的类，所以拿到的结果是null，下面我们来看一个获取`ClassLoader`的例子：
+
+```java
+public class PrintClassLoaderTree {
+    public static void main() {
+        ClassLoader classLoader = PrintClassLoaderTree.class.getClassLoader();
+
+        StringBuilder split = new StringBuilder("|--");
+        boolean needContinue = true;
+        while (needContinue) {
+            System.out.println(split.toString() + classLoader);
+            if (classLoader == null) {
+                needContinue = false;
+            } else {
+                classLoader = classLoader.getParent();
+                split.insert(0, "\t");
+            }
+        }
+    }
+}
+```
+
+输出结果为：
+```java
+|--jdk.internal.loader.ClassLoaders$AppClassLoader@5e481248
+	|--jdk.internal.loader.ClassLoaders$PlatformClassLoader@41906a77
+		|--null
+```
+
+从输出结果可以看出：
+- 我们编写的Java类 `PrintClassLoaderTree` 的 `ClassLoader` 是 `AppClassLoader`；
+- `AppClassLoader` 的 父 `ClassLoader` 是 `ExtClassLoader`；
+- `ExtClassLoader` 的 父`ClassLoader` 是 `Bootstrap ClassLoader`，因此输出结果为null。
+
+## 自定义类加载器
+
+除了 `BootstrapClassLoader` 其他类加载器均由 Java 实现且全部继承自 `java.lang.ClassLoader`。如果我们要自定义自己的类加载器，很明显需要继承 `ClassLoader` 抽象类。
+
+`ClassLoader` 类有两个关键 的方法：
+- `protected Class loadClass(String name, boolean resolve)`：加载指定二进制名称的类，实现了双亲委派机制。`name` 为类的二进制名称，`resolve`如果为`true`，在加载时调用`resolveClass(Class<?> c)` 方法解析该类。
+- `protected Class findClass(String name)`：根据类的二进制名称来查找类，默认实现是空方法。
+
+建议 `ClassLoader` 子类重写 `findClass(String name)` 方法而不是 `loadClass(String name, boolean resolve)` 方法。
+
+如果我们不想打破双亲委派模型，就重写 `ClassLoader` 中的 `findClass`方法即可，无法被父类加载器加载的类最终会通过这个方法被加载。但是，如果想打破双亲委派模型则需要重写`loadClass()`方法。
+
+## 双亲委派模型
+
+类加载器有很多种，当我们想要加载一个类的时候，具体是哪个类加载器加载呢？这就需要提到双亲委派模型了。
+
+`ClassLoader` 类使用委托模型来搜索类和资源，每个 `ClassLoader` 实例都有一个相关的父类加载器。需要查找类或资源时，`ClassLoader` 实例会在试图亲自查找类或资源之前，将搜索类或资源的任务委托给其父类加载器。
+
+虚拟机中被称为 `bootstrap class loader` 的内置类加载器本身没有父类加载器，但是可以作为 `ClassLoader` 实例的父类加载器。
+
+- `ClassLoader`类使用委托模型来搜索类和资源。
+- 双亲委派模型要求除了顶层的启动类加载器外，其余的类加载器都要有自己的父类加载器。
+- `ClassLoader` 实例会在试图亲自查找类或资源之前，将搜索类或资源的任务委托给其父类加载器。
 
 
 
