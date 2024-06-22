@@ -217,7 +217,7 @@ JVM判断两个Java类是否相同的具体规则：JVM不仅要看类的全名�
 
 ## 双亲委派模型优点
 
-双亲委派模型保证了 Java 程序的稳定运行，可以避免类的重复加载（JVM 区分不同类的方式不仅仅根据类名，相同的类文件被不同的类加载器加载产生的是两个不同的类），也保证了Java的核心API不被篡改。
+双亲委派模型保证了 Java 程序的稳定运行，可以避免类的重复加载（JVM 区分不同类的方式不仅仅根据类名，相同的类文件被不同的类加载器加载产生的是两个不同的类），也保证了Java的核心API不被篡改。**Java区分不同类不仅仅根据类名还有类加载器，因此双亲委派模型，可以避免有重复类加载，并且Java核心API不会被篡改，因为只会加载一次。**
 
 如果没有使用双亲委派模型，而是每个类加载器加载自己的话就会出现一些问题，比如我们编写一个称为 `java.lang.Object` 类的话，那么程序运行时，系统就会出现两个不同的 `Object` 类。双亲委派模型可以保证加载的是JRE里的那个 `Object` 类，而不是你写的 `Object` 类，这是因为 `AppClassLoader` 在加载你的`Object` 类时，会委托给 `ExtClassLoader` 去加载，而 `ExtClassLoader` 又会委托给 `BootstrapClassLoader`，`BootstrapClassLoader` 发现自己已经加载过 `Object` 类，会直接返回，而不会去加载你的 `Object` 类。
 
@@ -245,6 +245,23 @@ Tomcat这四个自定义的类加载器对应的目录如下：
 - 每个 Web 应用都会创建一个单独的 `WebAppClassLoader`，并在启动 Web 应用的线程里设置线程线程上下文类加载器为 `WebAppClassLoader`。各个 `WebAppClassLoader` 实例之间相互隔离，进而实现 Web 应用之间的类隔。
 
 单纯依靠自定义类加载器没办法满足某些场景的要求，例如，有些情况下，高层的类加载器需要加载低层的加载器才能加载的类。
+
+比如，SPI中，SPI的接口（如`java.sql.Driver`）是由Java核心库提供的，由`BootstrapClassLoader`加载。而SPI的实现（如`com.mysql.cj.jdbc.Driver`）是由第三方供应商提供的，它们是由应用程序类加载器或者自定义类加载器来加载的。默认情况下，一个类及其依赖类由同一个类加载器加载。所以，加载SPI的接口的类加载器（`BootstrapClassLoader`）也会用来加载SPI的实现，按照双亲委派模型，`BootstrapClassLoader`是无法找到SPI的实现类的，因为它无法委托给子类加载器去尝试加载。
+
+再比如，假设我们的项目中有Spring的jar包，由于其是Web应用之间共享的，因此会由`SharedClassLoader`加载（Web服务器是Tomcat）。我们项目中有一些用到了Spring的业务类，比如实现了Spring提供的接口、用到了Spirng提供的注解。所以，加载Spring的类加载器（也就是`SharedClassLoader`）也会用来加载这些业务类。但是业务类在Web应用目录下，不在`SharedCClassLoader`的加载路径下，所以`SharedClassLoader`无法找到业务类，也就无法加载它们。
+
+如何解决这个问题？**线程上下文类加载器（`ThreadContextClassLoader`）**。
+
+拿Spring这个例子来说，当Spring需要加载业务类的时候，它不是用自己的类加载器，而是用当前线程的上下文类加载器。每个Web应用都会创建一个单独的`WebAppClassLoader`，并在启动Web应用的线程里设置线程上下文类加载器为`WebAppClassLoader`。这样就可以让高层的类加载器（`SharedClassLoader`）借助子类加载（`WebAppClassLoader`）来加载业务类，破坏了Java的类加载委托机制，让应用逆向使用类加载器。
+
+线程上下文类加载器的原理是将一个类加载器保存在线程私有数据里，跟线程绑定，然后在需要的时候取出来使用这个类加载器通常是由应用程序或者容器（如Tomcat）设置的。
+
+`Java.lang.Thread`中的`getContextClassLoader()`和`setContextClassLoader(ClassLoader cl)`分别用来获取和设置线程上下文类加载器。如果没有通过`setContextClassLoader(ClassLoader cl)`进行设置的话，线程将继承其父线程的上下文类加载器。
+
+Spring获取线程上下文类加载器：
+```java
+cl = Thread.currentThread().getContextClassLoad();
+```
 
 
 
