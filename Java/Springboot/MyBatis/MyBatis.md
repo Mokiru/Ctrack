@@ -98,3 +98,213 @@ Mapper接口应`extends BaseMapper<实体类>`
     SELECT * FROM a
 </select>
 ```
+
+# 实例
+
+第一个：
+
+```java
+@Data
+public class Comment {
+    @TableId(value = "id", type = IdType.AUTO)
+    private Long id;
+
+    @TableField(value = "create_time")
+    @JsonFormat(timezone = "GMT+8", pattern = "yyyy-MM-dd HH:mm:ss")
+    private Date createTime;
+
+    @TableField("content")
+    private String content;
+
+    @TableField("user_id")
+    private Long userId;
+
+    @TableField("blog_id")
+    private Long blogId;
+
+    @TableField("isDelete")
+    @JsonProperty(access = JsonProperty.Access.WRITE_ONLY) // 禁止 序列化
+    private int isDelete;
+
+    @TableField("parent_id")
+    private Long parentId;
+
+    @TableField(exist = false)
+    private List<Comment> childComment;
+}
+```
+
+```xml
+<resultMap id="testMap" type="com.hoshino.momochi.model.domain.Comment">
+    <id column="id" property="id"/>
+    <result column="create_time" property="createTime"/>
+    <result column="content" property="content"/>
+    <result column="user_id" property="userId"/>
+    <result column="blog_id" property="blogId"/>
+    <result column="isDelete" property="isDelete"/>
+    <result column="parent_id" property="parentId"/>
+    <collection property="childComment" column="id" ofType="com.hoshino.momochi.model.domain.Comment"
+                select="nextTreeNode">
+        <id column="id" property="id"/>
+        <result column="create_time" property="createTime"/>
+        <result column="content" property="content"/>
+        <result column="user_id" property="userId"/>
+        <result column="blog_id" property="blogId"/>
+        <result column="isDelete" property="isDelete"/>
+        <result column="parent_id" property="parentId"/>
+    </collection>
+</resultMap>
+```
+
+第二个：收藏夹有收藏的文章列表，也有子收藏夹列表，同样子收藏夹也有一样的结构。
+
+```java
+@Data
+public class CollectionBlog {
+    @TableId(value = "id", type = IdType.AUTO)
+    private Long id;
+
+    @TableField(value = "create_time")
+    @JsonFormat(timezone = "GMT+8", pattern = "yyyy-MM-dd HH:mm:ss")
+    private Date createTime;
+
+    @TableField("collection_name")
+    private String collectionName;
+
+    @TableField("user_id")
+    private Long userId;
+
+    @TableField("parent_id")
+    private Long parentId;
+
+    @TableField("isDelete")
+    @JsonProperty(access = JsonProperty.Access.WRITE_ONLY) // 禁止 序列化
+    private int isDelete;
+
+    @TableField(exist = false)
+    List<Blog> blogList;
+
+    @TableField(exist = false)
+    List<CollectionBlog> childList;
+}
+```
+
+```xml
+<resultMap id="TestAll" type="com.hoshino.momochi.model.domain.CollectionBlog">
+    <id column="id" property="id"/>
+    <result column="create_time" property="createTime"/>
+    <result column="user_id" property="userId"/>
+    <result column="collection_name" property="collectionName"/>
+    <result column="parent_id" property="parentId"/>
+    <result column="isDelete" property="isDelete"/>
+    <collection property="blogList" ofType="com.hoshino.momochi.model.domain.Blog">
+        <id column="bid" property="id"/>
+        <result column="user_id" property="userId"/>
+        <result column="create_time" property="createTime"/>
+        <result column="last_update_time" property="lastUpdateTime"/>
+        <result column="blog_name" property="blogName"/>
+        <result column="brief" property="brief"/>
+        <result column="isDelete" property="isDelete"/>
+    </collection>
+    <collection property="childList" column="id" ofType="com.hoshino.momochi.model.domain.CollectionBlog"
+                select="nextTreeNode">
+        <id column="id" property="id"/>
+        <result column="create_time" property="createTime"/>
+        <result column="user_id" property="userId"/>
+        <result column="collection_name" property="collectionName"/>
+        <result column="parent_id" property="parentId"/>
+        <result column="isDelete" property="isDelete"/>
+    </collection>
+</resultMap>
+<select id="nextTreeNode" resultMap="TestAll">
+    SELECT *, b.id AS bid
+    FROM collection_blog c,
+        blog b
+    WHERE c.parent_id = #{id}
+    AND b.id IN (SELECT blog_id
+                    FROM collection_blog c,
+                        blog_star b
+                    WHERE c.id = b.collection_id
+                    AND c.parent_id = #{id})
+    AND c.isDelete = 0
+</select>
+
+<select id="findTreeNode" resultMap="TestAll">
+    SELECT *, b.id AS bid
+    FROM collection_blog c,
+        blog b
+    WHERE c.id = #{id}
+      AND b.id IN (SELECT blog_id
+                   FROM collection_blog c,
+                        blog_star b
+                   WHERE c.id = b.collection_id
+                     AND c.id = #{id})
+      AND c.isDelete = 0
+</select>
+```
+
+下面这个版本则是不用连接，而单独用两个子查询达到目的。
+
+```xml
+<resultMap id="HOSHINO" type="com.hoshino.momochi.model.domain.CollectionBlog">
+    <id column="id" property="id"/>
+    <result column="create_time" property="createTime"/>
+    <result column="user_id" property="userId"/>
+    <result column="collection_name" property="collectionName"/>
+    <result column="parent_id" property="parentId"/>
+    <result column="isDelete" property="isDelete"/>
+    <collection property="blogList" column="id" ofType="com.hoshino.momochi.model.domain.Blog"
+                select="takana">
+        <id column="bid" property="id"/>
+        <result column="user_id" property="userId"/>
+        <result column="create_time" property="createTime"/>
+        <result column="last_update_time" property="lastUpdateTime"/>
+        <result column="blog_name" property="blogName"/>
+        <result column="brief" property="brief"/>
+        <result column="isDelete" property="isDelete"/>
+    </collection>
+    <collection property="childList" column="id" ofType="com.hoshino.momochi.model.domain.CollectionBlog"
+                select="nakasha">
+        <id column="id" property="id"/>
+        <result column="create_time" property="createTime"/>
+        <result column="user_id" property="userId"/>
+        <result column="collection_name" property="collectionName"/>
+        <result column="parent_id" property="parentId"/>
+        <result column="isDelete" property="isDelete"/>
+    </collection>
+</resultMap>
+<resultMap id="blogMap" type="com.hoshino.momochi.model.domain.Blog">
+    <id column="bid" property="id"/>
+    <result column="user_id" property="userId"/>
+    <result column="create_time" property="createTime"/>
+    <result column="last_update_time" property="lastUpdateTime"/>
+    <result column="blog_name" property="blogName"/>
+    <result column="brief" property="brief"/>
+    <result column="isDelete" property="isDelete"/>
+</resultMap>
+<!--  List  -->
+<select id="nakasha" resultMap="HOSHINO">
+    SELECT *
+    FROM collection_blog
+    WHERE parent_id = #{id}
+      AND isDelete = 0
+</select>
+
+<select id="takana" resultMap="blogMap">
+    SELECT *, b.id AS bid
+    FROM blog_star bs,
+         blog b
+    WHERE bs.collection_id = #{id}
+      AND bs.blog_id = b.id
+      AND bs.isDelete = 0
+      AND b.isDelete = 0
+</select>
+
+<select id="findAllByUserId" resultMap="HOSHINO">
+    SELECT *
+    FROM collection_blog
+    WHERE user_id = #{userId}
+      AND parent_id = 0
+      AND isDelete = 0
+</select>
+```
